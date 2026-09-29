@@ -88,11 +88,12 @@ await check('an agent that pays reads the post, gets the receipt header, and the
   assert.deepEqual(row.slice(0, 2), [paid.id, '50000'])
   assert.match(row[2], /^0x[0-9a-f]{64}$/)
 })
-await check('the same payment again for the same post: served from the site, P2Flux not asked, not charged twice', async () => {
+await check('the same payment again, even for the same post, is refused - and P2Flux is not asked', async () => {
   const before = calls()
   const r = await get(rel(paid.url), { payment: pay('p1') })
-  assert.equal(r.status, 200)
-  assert.match(r.text, /POST-SECRET-1/)
+  assert.equal(r.status, 402)
+  assert.doesNotMatch(r.text, /POST-SECRET-1/)
+  assert.equal(decode(r.headers.get('payment-required')).error, 'invalid_transaction_state')
   assert.equal(calls(), before)
   assert.equal(wp('db', 'query', 'SELECT COUNT(*) FROM wp_p2flux_ap_payments', '--skip-column-names'), '1')
 })

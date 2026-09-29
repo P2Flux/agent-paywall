@@ -12,15 +12,16 @@ defined( 'ABSPATH' ) || exit;
  *
  * Humans and logged-in users pass untouched. An agent that opens a paid post or calls a paid route
  * gets HTTP 402 with the x402 requirement; one that sends a payment has it settled by P2Flux BEFORE
- * the content is built, so one payment serves one page. In lists, feeds and REST collections an
- * agent sees the price instead of the text of paid posts.
+ * the content is built. One payment serves one response, once: a payment presented again - by the
+ * same agent or by anyone it was shared with - is refused, as x402 requires. In lists, feeds and REST
+ * collections an agent sees the price instead of the text of paid posts.
  */
 class P2Flux_AP_Gate {
 
 	/** A real x402 payment header is ~1.1 KB. */
 	const MAX_HEADER = 8192;
-	/** How long a paid header keeps opening the same URL - for an agent whose connection dropped. */
-	const REPLAY_WINDOW = 600;
+	/** How long this site remembers a used payment, to refuse it without asking P2Flux. */
+	const USED_TTL = 600;
 
 	/**
 	 * Post paid for in this request: its content is served in full.
@@ -226,11 +227,10 @@ class P2Flux_AP_Gate {
 			return self::required( $settings, $price, $url, $mime_type, 'invalid_payload' );
 		}
 
-		// The same payment again for the same page: the agent lost our answer. Serve it; never charge twice.
-		$key  = 'p2flux_ap_paid_' . hash( 'sha256', $header );
-		$seen = get_transient( $key );
-		if ( is_array( $seen ) ) {
-			return self::replayed( $seen, $settings, $price, $url, $mime_type );
+		// Used here before: refused without asking P2Flux. P2Flux would refuse it too - a payment settles once.
+		$key = 'p2flux_ap_used_' . hash( 'sha256', $header );
+		if ( false !== get_transient( $key ) ) {
+			return self::required( $settings, $price, $url, $mime_type, 'invalid_transaction_state' );
 		}
 
 		$answer = P2Flux_AP_Client::redeem( $settings['wallet'], $price, $header, $url, $settings['environment'] );
@@ -238,50 +238,18 @@ class P2Flux_AP_Gate {
 			return self::unavailable( $settings );
 		}
 		if ( ! empty( $answer['paid'] ) ) {
-			$response = isset( $answer['payment_response'] ) ? (string) $answer['payment_response'] : '';
-			set_transient(
-				$key,
-				array(
-					'url'              => $url,
-					'payment_response' => $response,
-				),
-				self::REPLAY_WINDOW
-			);
+			set_transient( $key, 1, self::USED_TTL );
 			P2Flux_AP_Log::insert( $post_id, $url, P2Flux_AP_Rules::units( $price ), (string) ( $answer['payer'] ?? '' ), (string) ( $answer['transaction'] ?? '' ), (string) ( $answer['network'] ?? '' ) );
-			if ( '' !== $response ) {
-				header( 'PAYMENT-RESPONSE: ' . $response );
+			if ( ! empty( $answer['payment_response'] ) ) {
+				header( 'PAYMENT-RESPONSE: ' . $answer['payment_response'] );
 			}
 			return array( 'ok' => true );
 		}
 		$reason = isset( $answer['reason'] ) ? (string) $answer['reason'] : 'payment_refused';
-		// A concurrent request with the same payment may have been paid a moment ago.
 		if ( 'invalid_transaction_state' === $reason ) {
-			$seen = get_transient( $key );
-			if ( is_array( $seen ) ) {
-				return self::replayed( $seen, $settings, $price, $url, $mime_type );
-			}
+			set_transient( $key, 1, self::USED_TTL );
 		}
 		return self::required( $settings, $price, $url, $mime_type, $reason );
-	}
-
-	/**
-	 * A payment this site already accepted, presented again.
-	 *
-	 * @param array  $seen      Stored record.
-	 * @param array  $settings  Settings.
-	 * @param string $price     Price.
-	 * @param string $url       URL now asked for.
-	 * @param string $mime_type Mime type.
-	 * @return array
-	 */
-	private static function replayed( array $seen, array $settings, $price, $url, $mime_type ) {
-		if ( ( $seen['url'] ?? '' ) !== $url ) {
-			return self::required( $settings, $price, $url, $mime_type, 'invalid_transaction_state' );
-		}
-		if ( ! empty( $seen['payment_response'] ) ) {
-			header( 'PAYMENT-RESPONSE: ' . $seen['payment_response'] );
-		}
-		return array( 'ok' => true );
 	}
 
 	/**

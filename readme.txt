@@ -55,7 +55,7 @@ Any wallet that can receive USDC on the Base network - for example Coinbase Wall
 
 = Can someone pay once and read many pages? =
 
-No. Each payment opens one page once. If an agent loses the answer and sends the same payment again for the same page within ten minutes, it gets the page again without paying twice.
+No. Each payment opens one page once. The same payment sent again - by the same agent or by anyone it was passed to - is refused, as the x402 standard requires.
 
 = What happens if P2Flux is down? =
 

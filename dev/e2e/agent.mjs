@@ -87,15 +87,16 @@ const check = (name, ok, detail) => { results.push(ok); console.log(`${ok ? 'PAS
     `HTTP ${res.status} net=${paid?.args.net} fee=${paid?.args.fee} seller +${sellerAfter - sellerBefore} logged=${logged.slice(0, 12)}`)
 }
 
-// 2. The same payment header again: same page served from the site's record, another page refused.
+// 2. The same payment header again - same page or another - is refused; nothing is sent.
 {
   const n0 = await relayerNonce()
   const same = await raw(posts[0].url, lastSent)
   const other = await raw(posts[1].url, lastSent)
-  const otherText = await other.text()
+  const texts = await Promise.all([same.text(), other.text()])
   const n1 = await relayerNonce()
-  check('2  the same payment again: same page served, another page refused, nothing sent',
-    same.status === 200 && other.status === 402 && !otherText.includes('E2E-SECRET-2') && decode(other.headers.get('payment-required')).error === 'invalid_transaction_state' && n0 === n1,
+  const reasons = [same, other].map((r) => (r.headers.get('payment-required') ? decode(r.headers.get('payment-required')).error : null))
+  check('2  the same payment again: refused for the same page and for another, nothing sent',
+    same.status === 402 && other.status === 402 && !texts.join().includes('E2E-SECRET') && reasons.every((x) => x === 'invalid_transaction_state') && n0 === n1,
     `same=${same.status} other=${other.status} relayer txs=${n1 - n0}`)
 }
 
