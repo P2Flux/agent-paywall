@@ -121,7 +121,8 @@ class P2Flux_AP_Gate {
 			return;
 		}
 		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
-			define( 'DONOTCACHEPAGE', true );
+			// The constant page-cache plugins (WP Super Cache, W3 Total Cache, LiteSpeed…) read: not ours to prefix.
+			define( 'DONOTCACHEPAGE', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound
 		}
 		nocache_headers();
 		header( 'Vary: User-Agent, PAYMENT-SIGNATURE', false );
