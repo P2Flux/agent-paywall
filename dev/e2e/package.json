@@ -1,0 +1,12 @@
+{
+  "name": "p2flux-agent-paywall-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Live check on Base Sepolia: the official, unmodified x402 agent pays a local WordPress running this plugin through api-test.",
+  "dependencies": {
+    "@x402/core": "2.27.0",
+    "@x402/evm": "2.27.0",
+    "@x402/fetch": "2.27.0",
+    "viem": "^2.21.0"
+  }
+}

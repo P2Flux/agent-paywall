@@ -1,0 +1,9 @@
+# Not shipped: development, tests, CI, developer documentation.
+.git
+.github
+.gitignore
+.distignore
+dev
+tests
+node_modules
+*.md
