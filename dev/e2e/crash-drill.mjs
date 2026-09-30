@@ -26,7 +26,8 @@ const client = new x402Client()
 client.register('eip155:*', new BatchSettlementEvmScheme(toClientEvmSigner(account, chain)))
 const agent = wrapFetchWithPayment(fetch, client)
 const charged = () => {
-  const out = ssh(`sudo sh -c 'cat /var/lib/p2flux/x402-batch/*/server/*.json'`)
+  // One file per line: channel files carry no trailing newline, and there is more than one.
+  const out = ssh(`sudo sh -c 'for f in /var/lib/p2flux/x402-batch/*/server/*.json; do cat \\$f; echo; done'`)
   const mine = out.split(/\n(?=\{)/).map((j) => { try { return JSON.parse(j) } catch { return null } })
     .filter((c) => c?.channelConfig?.payer?.toLowerCase() === account.address.toLowerCase())
   return mine.reduce((sum, c) => sum + BigInt(c.chargedCumulativeAmount), 0n)
