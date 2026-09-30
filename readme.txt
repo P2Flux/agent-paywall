@@ -4,7 +4,7 @@ Tags: ai, paywall, x402, usdc, crypto
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 0.1.0
+Stable tag: 0.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,7 +29,12 @@ No account, no API key, no WooCommerce. Nothing to install on your server beyond
 
 **What it costs**
 
-The plugin is free. P2Flux keeps 1% of each payment, at least 0.003 USDC. For a 0.05 USDC page you receive 0.047. The fee is taken by a smart contract in the same transaction; P2Flux never holds your money.
+The plugin is free. Agents pay in one of two ways, and you do not have to choose:
+
+* **Pay per page**: P2Flux keeps 1% of each payment, at least 0.003 USDC, and you receive the rest at once. For a 0.05 USDC page you receive 0.047.
+* **Prepaid balance**: the agent puts at least 1 USDC aside once, in the standard x402 escrow, and then pays each page with a signature - no transaction per page. You receive the money in one payout when it reaches 2 USDC, or weekly. P2Flux keeps 3%. For a 0.05 USDC page you receive 0.0485.
+
+Fees are taken by smart contracts on the way to your wallet; P2Flux never holds your money. An agent's unused prepaid balance stays its own and can always be withdrawn.
 
 **What you get**
 
@@ -89,6 +94,9 @@ Nothing about your visitors is sent. P2Flux terms: https://p2flux.com/terms.html
 2. The price box in the editor.
 
 == Changelog ==
+
+= 0.2.0 =
+* Prepaid balance (x402 batch settlement): agents pay each page without a transaction; payouts at 2 USDC or weekly, 3%.
 
 = 0.1.0 =
 * First version: pay-per-page for AI agents with x402, posts, pages, categories, REST routes, earnings.

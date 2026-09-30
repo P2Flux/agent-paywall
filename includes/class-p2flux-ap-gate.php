@@ -239,7 +239,10 @@ class P2Flux_AP_Gate {
 		}
 		if ( ! empty( $answer['paid'] ) ) {
 			set_transient( $key, 1, self::USED_TTL );
-			P2Flux_AP_Log::insert( $post_id, $url, P2Flux_AP_Rules::units( $price ), (string) ( $answer['payer'] ?? '' ), (string) ( $answer['transaction'] ?? '' ), (string) ( $answer['network'] ?? '' ) );
+			$scheme = isset( $answer['scheme'] ) ? (string) $answer['scheme'] : 'exact';
+			// A prepaid request has no transaction of its own: its receipt identifies it.
+			$id = 'batch-settlement' === $scheme ? (string) ( $answer['receipt'] ?? '' ) : (string) ( $answer['transaction'] ?? '' );
+			P2Flux_AP_Log::insert( $post_id, $url, P2Flux_AP_Rules::units( $price ), (string) ( $answer['payer'] ?? '' ), $id, (string) ( $answer['network'] ?? '' ), $scheme );
 			if ( ! empty( $answer['payment_response'] ) ) {
 				header( 'PAYMENT-RESPONSE: ' . $answer['payment_response'] );
 			}
@@ -249,7 +252,28 @@ class P2Flux_AP_Gate {
 		if ( 'invalid_transaction_state' === $reason ) {
 			set_transient( $key, 1, self::USED_TTL );
 		}
+		// A prepaid refusal carries its own 402: the channel state the agent resynchronises to.
+		if ( ! empty( $answer['payment_required'] ) && is_string( $answer['payment_required'] ) ) {
+			return self::forwarded( $answer['payment_required'], $reason );
+		}
 		return self::required( $settings, $price, $url, $mime_type, $reason );
+	}
+
+	/**
+	 * A 402 exactly as P2Flux wrote it.
+	 *
+	 * @param string $header PAYMENT-REQUIRED header value.
+	 * @param string $reason Why the payment was refused.
+	 * @return array
+	 */
+	private static function forwarded( $header, $reason ) {
+		$body = json_decode( (string) base64_decode( $header, true ), true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- the x402 header format.
+		return array(
+			'ok'      => false,
+			'status'  => 402,
+			'headers' => array( 'PAYMENT-REQUIRED' => $header ),
+			'body'    => is_array( $body ) ? $body : array( 'error' => $reason ),
+		);
 	}
 
 	/**
@@ -266,6 +290,9 @@ class P2Flux_AP_Gate {
 		$accepts = P2Flux_AP_Client::challenge( $settings['wallet'], $price, $settings['environment'] );
 		if ( is_wp_error( $accepts ) ) {
 			return self::unavailable( $settings );
+		}
+		if ( 'yes' !== $settings['prepaid'] ) {
+			$accepts = array_values( array_filter( $accepts, static fn( $a ) => is_array( $a ) && 'batch-settlement' !== ( $a['scheme'] ?? '' ) ) );
 		}
 		$required = array(
 			'x402Version' => 2,

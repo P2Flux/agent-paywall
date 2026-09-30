@@ -31,7 +31,7 @@ try { wp('option', 'delete', 'p2flux_ap_fake_calls') } catch {}
 wp('db', 'query', "DELETE FROM wp_options WHERE option_name LIKE 'p2flux\\_ap\\_fake\\_used\\_%'")
 clearTransients()
 wp('eval', `global $wpdb; $wpdb->query("TRUNCATE {$wpdb->prefix}p2flux_ap_payments");`)
-const settings = { wallet: WALLET, environment: 'test', default_price: '0.05', paid_post_types: ['post'], paid_categories: [], paid_routes: ['/paid/v1/'], api_down: 'refuse' }
+const settings = { wallet: WALLET, environment: 'test', default_price: '0.05', paid_post_types: ['post'], paid_categories: [], paid_routes: ['/paid/v1/'], api_down: 'refuse', prepaid: 'yes' }
 const setSettings = (over = {}) => wp('option', 'update', 'p2flux_ap_settings', JSON.stringify({ ...settings, ...over }), '--format=json')
 setSettings()
 for (const id of wp('post', 'list', '--post_type=post,page', '--format=ids').split(' ').filter(Boolean)) wp('post', 'delete', id, '--force')
@@ -133,6 +133,37 @@ await check('the price is the one set now: a payment made for an old price is re
   assert.equal(decode(r.headers.get('payment-required')).error, 'invalid_payment_requirements')
   assert.equal(decode(r.headers.get('payment-required')).accepts[0].amount, '70000')
   setSettings()
+})
+
+// --- prepaid (batch settlement) ------------------------------------------------------------------
+await check('the 402 offers pay-per-page and prepaid; switched off, pay-per-page only', async () => {
+  clearTransients()
+  const both = decode((await get(rel(paid.url))).headers.get('payment-required')).accepts.map((a) => a.scheme)
+  assert.deepEqual(both, ['exact', 'batch-settlement'])
+  setSettings({ prepaid: 'no' })
+  const one = decode((await get(rel(paid.url))).headers.get('payment-required')).accepts.map((a) => a.scheme)
+  assert.deepEqual(one, ['exact'])
+  setSettings()
+})
+await check('a prepaid payment reads the post and is logged as prepaid, with its receipt', async () => {
+  const r = await get(rel(paid2.url), { payment: pay('batch-1') })
+  assert.equal(r.status, 200)
+  assert.match(r.text, /POST-SECRET-2/)
+  const row = wp('db', 'query', "SELECT scheme, tx FROM wp_p2flux_ap_payments WHERE scheme = 'batch-settlement'", '--skip-column-names').split('\t')
+  assert.equal(row[0], 'batch-settlement')
+  assert.match(row[1], /^0x[0-9a-f]{64}$/)
+})
+await check('a prepaid refusal forwards P2Flux\'s own 402 - the channel state the agent resyncs to', async () => {
+  const r = await get(rel(paid2.url), { payment: pay('batchbad-1') })
+  assert.equal(r.status, 402)
+  const req = decode(r.headers.get('payment-required'))
+  assert.equal(req.error, 'batch_settlement_stale_cumulative_amount')
+  assert.equal(req.accepts[0].extra.channelState.chargedCumulativeAmount, '150000')
+  assert.doesNotMatch(r.text, /POST-SECRET-2/)
+})
+await check('the settings page shows prepaid rows without a transaction link', async () => {
+  const html = wp('eval', 'wp_set_current_user(1); ob_start(); P2Flux_AP_Settings::render(); echo ob_get_clean();')
+  assert.match(html, /prepaid/)
 })
 
 // --- lists, feeds, REST ------------------------------------------------------------------------------

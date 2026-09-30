@@ -12,7 +12,7 @@ defined( 'ABSPATH' ) || exit;
  */
 class P2Flux_AP_Log {
 
-	const DB_VERSION = '1';
+	const DB_VERSION = '2';
 	const PRUNE_HOOK = 'p2flux_ap_prune';
 	/** Rows older than this are deleted daily. */
 	const KEEP_DAYS = 400;
@@ -47,6 +47,7 @@ class P2Flux_AP_Log {
 				payer char(42) NOT NULL DEFAULT '',
 				tx char(66) NOT NULL,
 				network varchar(32) NOT NULL DEFAULT '',
+				scheme varchar(32) NOT NULL DEFAULT 'exact',
 				PRIMARY KEY  (id),
 				UNIQUE KEY tx (tx),
 				KEY created_at (created_at)
@@ -77,11 +78,12 @@ class P2Flux_AP_Log {
 	 * @param string $url     URL paid for.
 	 * @param int    $amount  USDC base units.
 	 * @param string $payer   Agent wallet.
-	 * @param string $tx      Transaction hash.
+	 * @param string $tx      Transaction hash, or the receipt of a prepaid request.
 	 * @param string $network CAIP-2 network.
+	 * @param string $scheme  exact | batch-settlement.
 	 * @return void
 	 */
-	public static function insert( $post_id, $url, $amount, $payer, $tx, $network ) {
+	public static function insert( $post_id, $url, $amount, $payer, $tx, $network, $scheme = 'exact' ) {
 		global $wpdb;
 		if ( ! preg_match( '/^0x[0-9a-fA-F]{64}$/', (string) $tx ) ) {
 			return;
@@ -89,7 +91,7 @@ class P2Flux_AP_Log {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table, one insert.
 		$wpdb->query(
 			$wpdb->prepare(
-				'INSERT IGNORE INTO %i (created_at, post_id, url, amount, payer, tx, network) VALUES (%s, %d, %s, %d, %s, %s, %s)',
+				'INSERT IGNORE INTO %i (created_at, post_id, url, amount, payer, tx, network, scheme) VALUES (%s, %d, %s, %d, %s, %s, %s, %s)',
 				self::table(),
 				gmdate( 'Y-m-d H:i:s' ),
 				(int) $post_id,
@@ -97,7 +99,8 @@ class P2Flux_AP_Log {
 				(int) $amount,
 				preg_match( '/^0x[0-9a-fA-F]{40}$/', (string) $payer ) ? $payer : '',
 				$tx,
-				substr( (string) $network, 0, 32 )
+				substr( (string) $network, 0, 32 ),
+				'batch-settlement' === $scheme ? 'batch-settlement' : 'exact'
 			)
 		);
 	}

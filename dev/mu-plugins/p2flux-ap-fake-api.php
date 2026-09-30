@@ -53,6 +53,13 @@ add_filter(
 							'maxTimeoutSeconds' => 300,
 							'extra'             => array( 'name' => 'USDC', 'version' => '2', 'p2flux' => array( 'recipient' => $body['recipient'] ) ),
 						),
+						array(
+							'scheme'  => 'batch-settlement',
+							'network' => 'eip155:84532',
+							'amount'  => (string) $units,
+							'payTo'   => '0x' . substr( md5( 'batch' . $body['recipient'] ), 0, 40 ),
+							'extra'   => array( 'minDeposit' => '1000000', 'withdrawDelay' => 86400 ),
+						),
 					),
 				)
 			);
@@ -62,6 +69,10 @@ add_filter(
 		$refuse  = static fn( $reason ) => $reply( 200, array( 'paid' => false, 'reason' => $reason, 'network' => 'eip155:84532' ) );
 		if ( '' === $id ) {
 			return $refuse( 'invalid_payload' );
+		}
+		if ( 0 === strpos( $id, 'batchbad-' ) ) {
+			$state = base64_encode( wp_json_encode( array( 'x402Version' => 2, 'error' => 'batch_settlement_stale_cumulative_amount', 'accepts' => array( array( 'scheme' => 'batch-settlement', 'extra' => array( 'channelState' => array( 'chargedCumulativeAmount' => '150000' ) ) ) ) ) ) ); // phpcs:ignore
+			return $reply( 200, array( 'paid' => false, 'reason' => 'batch_settlement_stale_cumulative_amount', 'network' => 'eip155:84532', 'scheme' => 'batch-settlement', 'payment_required' => $state ) );
 		}
 		if ( 0 === strpos( $id, 'bad-' ) ) {
 			return $refuse( 'invalid_exact_evm_insufficient_balance' );
@@ -79,6 +90,9 @@ add_filter(
 			usleep( 800000 );
 		}
 		$tx = '0x' . hash( 'sha256', $id );
+		if ( 0 === strpos( $id, 'batch-' ) ) {
+			return $reply( 200, array( 'paid' => true, 'scheme' => 'batch-settlement', 'receipt' => $tx, 'payer' => '0x9B710c4Cc6A63Fc0728748Af852e2183fb936262', 'amount' => (string) $units, 'network' => 'eip155:84532', 'payment_response' => base64_encode( '{"success":true}' ) ) ); // phpcs:ignore
+		}
 		return $reply(
 			200,
 			array(

@@ -29,6 +29,7 @@ class P2Flux_AP_Settings {
 			'paid_categories' => array(),
 			'paid_routes'     => array(),
 			'api_down'        => 'refuse',
+			'prepaid'         => 'yes',
 		);
 	}
 
@@ -110,6 +111,7 @@ class P2Flux_AP_Settings {
 
 		$clean['environment'] = ( isset( $input['environment'] ) && 'live' === $input['environment'] ) ? 'live' : 'test';
 		$clean['api_down']    = ( isset( $input['api_down'] ) && 'free' === $input['api_down'] ) ? 'free' : 'refuse';
+		$clean['prepaid']     = ( isset( $input['prepaid'] ) && 'yes' === $input['prepaid'] ) ? 'yes' : 'no';
 
 		$price = P2Flux_AP_Rules::normalise_price( isset( $input['default_price'] ) ? sanitize_text_field( (string) $input['default_price'] ) : '' );
 		if ( null === $price ) {
@@ -199,7 +201,7 @@ class P2Flux_AP_Settings {
 				<div><span><?php esc_html_e( 'This month', 'p2flux-agent-paywall' ); ?></span><strong><?php echo esc_html( P2Flux_AP_Rules::format_units( $totals['month']['units'] ) ); ?> USDC</strong><em><?php echo esc_html( sprintf( /* translators: %d: number of payments */ _n( '%d payment', '%d payments', $totals['month']['count'], 'p2flux-agent-paywall' ), $totals['month']['count'] ) ); ?></em></div>
 				<div><span><?php esc_html_e( 'All time', 'p2flux-agent-paywall' ); ?></span><strong><?php echo esc_html( P2Flux_AP_Rules::format_units( $totals['all']['units'] ) ); ?> USDC</strong><em><?php echo esc_html( sprintf( /* translators: %d: number of payments */ _n( '%d payment', '%d payments', $totals['all']['count'], 'p2flux-agent-paywall' ), $totals['all']['count'] ) ); ?></em></div>
 			</div>
-			<p class="description"><?php esc_html_e( 'Amounts are what agents paid; your wallet receives them less the P2Flux fee.', 'p2flux-agent-paywall' ); ?></p>
+			<p class="description"><?php esc_html_e( 'Amounts are what agents paid. Pay-per-page payments reach your wallet at once, less 1% (at least 0.003 USDC); prepaid ones in a payout at 2 USDC or weekly, less 3%.', 'p2flux-agent-paywall' ); ?></p>
 			<?php endif; ?>
 
 			<form method="post" action="options.php">
@@ -254,6 +256,14 @@ class P2Flux_AP_Settings {
 						</td>
 					</tr>
 					<tr>
+						<th scope="row"><?php esc_html_e( 'Prepaid balance', 'p2flux-agent-paywall' ); ?></th>
+						<td>
+							<input type="hidden" name="<?php echo esc_attr( $name ); ?>[prepaid]" value="no">
+							<label><input type="checkbox" name="<?php echo esc_attr( $name ); ?>[prepaid]" value="yes" <?php checked( $s['prepaid'], 'yes' ); ?>> <?php esc_html_e( 'Let agents pay from a prepaid balance (recommended)', 'p2flux-agent-paywall' ); ?></label>
+							<p class="description"><?php esc_html_e( 'An agent puts at least 1 USDC aside once, then pays each page without a transaction - cheaper and faster for small prices. You receive the money in one payout when it reaches 2 USDC, or weekly, less 3%. Pay-per-page stays available for every agent.', 'p2flux-agent-paywall' ); ?></p>
+						</td>
+					</tr>
+					<tr>
 						<th scope="row"><?php esc_html_e( 'If P2Flux cannot be reached', 'p2flux-agent-paywall' ); ?></th>
 						<td>
 							<label><input type="radio" name="<?php echo esc_attr( $name ); ?>[api_down]" value="refuse" <?php checked( $s['api_down'], 'refuse' ); ?>> <?php esc_html_e( 'Agents are asked to come back later (recommended)', 'p2flux-agent-paywall' ); ?></label><br>
@@ -276,7 +286,11 @@ class P2Flux_AP_Settings {
 						<td><a href="<?php echo esc_url( $row->url ); ?>"><?php echo esc_html( wp_parse_url( $row->url, PHP_URL_PATH ) ?? $row->url ); ?></a></td>
 						<td><?php echo esc_html( P2Flux_AP_Rules::format_units( (int) $row->amount ) ); ?> USDC</td>
 						<td class="code"><?php echo esc_html( substr( $row->payer, 0, 6 ) . '…' . substr( $row->payer, -4 ) ); ?></td>
+						<?php if ( 'batch-settlement' === ( $row->scheme ?? 'exact' ) ) : ?>
+						<td><?php esc_html_e( 'prepaid', 'p2flux-agent-paywall' ); ?></td>
+						<?php else : ?>
 						<td><a href="<?php echo esc_url( ( 'eip155:8453' === $row->network ? 'https://basescan.org/tx/' : 'https://sepolia.basescan.org/tx/' ) . $row->tx ); ?>" target="_blank" rel="noopener"><?php echo esc_html( substr( $row->tx, 0, 10 ) . '…' ); ?></a></td>
+						<?php endif; ?>
 					</tr>
 				<?php endforeach; ?>
 				</tbody>
