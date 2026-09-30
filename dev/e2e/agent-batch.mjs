@@ -14,7 +14,6 @@ import { baseSepolia } from 'viem/chains'
 
 const PATH = `${process.env.HOME}/projects/p2flux_wp_paywall`
 const SELLER = process.env.SELLER_WALLET
-const FEE_WALLET = process.env.FEE_WALLET
 const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
 const RELAYER = '0xC6bec1306F4FA2a81e41945f739829DAfD5908EC'
 const PAGES = Number(process.env.PAGES || 50)
@@ -49,7 +48,7 @@ const recording = async (input, init) => {
   return fetch(input, init)
 }
 const agent = wrapFetchWithPayment(recording, batch)
-const [seller0, fee0, agent0] = await Promise.all([bal(SELLER), bal(FEE_WALLET), bal(account.address)])
+const [agent0, startBlock] = await Promise.all([bal(account.address), chain.getBlockNumber()])
 const n0 = await relayerNonce()
 let read = 0
 for (const p of posts) {
@@ -60,9 +59,12 @@ for (const p of posts) {
 const n1 = await relayerNonce()
 const agent1 = await bal(account.address)
 const rows = wp('db', 'query', "SELECT COUNT(*) FROM wp_p2flux_ap_payments WHERE scheme = 'batch-settlement'", '--skip-column-names')
-check(`1  ${PAGES} pages prepaid: one deposit transaction, none per page`,
-  read === PAGES && n1 - n0 === 1 && Number(rows) >= PAGES,
-  `read ${read}/${PAGES}, relayer txs ${n1 - n0}, agent deposited ${agent0 - agent1}, logged ${rows}`)
+// The official client deposits (and tops up) in steps of at least the $1 minimum: every relayer
+// transaction here is a deposit that moved at least $1 of the agent's money - none is per page.
+const txs = n1 - n0
+check(`1  ${PAGES} pages prepaid: only deposits (>= $1 each), no transaction per page`,
+  read === PAGES && txs >= 1 && BigInt(txs) * 1_000_000n <= agent0 - agent1 && txs < PAGES / 10 && Number(rows) >= PAGES,
+  `read ${read}/${PAGES}, relayer txs ${txs}, agent deposited ${agent0 - agent1}, logged ${rows}`)
 
 // 2. The same voucher again is refused; nothing is sent.
 {
@@ -80,20 +82,23 @@ check(`1  ${PAGES} pages prepaid: one deposit transaction, none per page`,
   check('3  an exact-only agent pays per page', r.status === 200 && !!settlement?.transaction, `HTTP ${r.status} tx ${settlement?.transaction?.slice(0, 12)}`)
 }
 
-// 4. The worker pays the seller out: claim, settle, flush. 97% seller, 3% P2Flux, on chain.
+// 4. The worker pays the seller out: claim, settle, flush - read from the Flushed event, which is
+//    what the vault actually paid (it may also hold earlier payments to the same seller).
 {
+  const VAULTS = '0x08EbEb85c53895F752bdAc9C115aF33FCff04F3E'
+  const flushed = parseAbi(['event Flushed(address indexed recipient, uint256 net, uint256 fee)'])
   const owed = BigInt(PAGES) * 50_000n
-  let sellerGain = 0n, feeGain = 0n
   const deadline = Date.now() + 20 * 60_000
-  while (Date.now() < deadline) {
+  let payout = null
+  while (Date.now() < deadline && !payout) {
     await sleep(30_000)
-    ;[sellerGain, feeGain] = [(await bal(SELLER)) - seller0, (await bal(FEE_WALLET)) - fee0]
-    // The exact payment of step 3 paid 0.047 / 0.003 too.
-    if (sellerGain - 47_000n >= (owed * 97n) / 100n) break
+    const logs = await chain.getLogs({ address: VAULTS, event: flushed[0], args: { recipient: SELLER }, fromBlock: startBlock })
+    if (logs.length) payout = logs.at(-1).args
   }
-  const batchSeller = sellerGain - 47_000n, batchFee = feeGain - 3_000n
-  check('4  worker payout: seller 97%, P2Flux 3%', batchSeller === (owed * 97n) / 100n && batchFee === owed - (owed * 97n) / 100n,
-    `seller +${batchSeller} fee +${batchFee} of ${owed}`)
+  const total = payout ? payout.net + payout.fee : 0n
+  check('4  worker payout: seller 97%, P2Flux 3% of everything in the vault, at least what was owed',
+    !!payout && total >= owed && payout.fee === (total * 300n) / 10_000n,
+    payout ? `paid out ${total}: seller ${payout.net}, fee ${payout.fee} (owed ${owed})` : 'no payout within 20 min')
 }
 
 for (const p of posts) wp('post', 'delete', p.id, '--force')
