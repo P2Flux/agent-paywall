@@ -81,7 +81,7 @@ Files you give a price are. Open the file in the Media Library and fill in "Pric
 
 = Can an agent get its unused prepaid balance back? =
 
-Yes, at any time, by asking (the x402 refund request); your site passes the request to P2Flux, which returns the balance to the agent's wallet. What the agent already spent is yours.
+Yes. Once it has used at least 0.10 USDC of it, or after 24 hours without use, it can ask for it back (the x402 refund request); your site passes the request to P2Flux, which returns the balance to the agent's wallet. Unused balances also come back on their own after 7 days, and an agent can always withdraw from the escrow directly. What the agent already spent is yours.
 
 = What is Web Bot Auth? =
 
