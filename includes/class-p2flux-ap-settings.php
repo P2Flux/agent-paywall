@@ -52,6 +52,8 @@ class P2Flux_AP_Settings {
 	public static function register() {
 		add_action( 'update_option_' . self::OPTION, array( 'P2Flux_AP_Discovery', 'announce' ), 10, 0 );
 		add_action( 'add_option_' . self::OPTION, array( 'P2Flux_AP_Discovery', 'announce' ), 10, 0 );
+		// With no wallet nothing is paid, and the uploads rule would send agents to a handler that is not there.
+		add_action( 'update_option_' . self::OPTION, array( __CLASS__, 'sync_files' ), 10, 0 );
 		add_action( 'admin_menu', array( __CLASS__, 'menu' ) );
 		add_action( 'admin_init', array( __CLASS__, 'register_setting' ) );
 		add_action( 'admin_post_p2flux_ap_check', array( __CLASS__, 'check' ) );
@@ -71,6 +73,15 @@ class P2Flux_AP_Settings {
 			self::PAGE,
 			array( __CLASS__, 'render' )
 		);
+	}
+
+	/**
+	 * Keep the uploads rule in step with the wallet: removed without one, written again with one.
+	 *
+	 * @return void
+	 */
+	public static function sync_files() {
+		P2Flux_AP_Files::sync( '' === self::get()['wallet'] );
 	}
 
 	/**

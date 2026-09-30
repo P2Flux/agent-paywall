@@ -232,6 +232,8 @@ await check('P2Flux unreachable and the owner chose "free": agents read', async 
   assert.match(r.text, /POST-SECRET-1/)
   setSettings()
   wp('option', 'update', 'p2flux_ap_fake', '{}', '--format=json')
+  // P2Flux is back. The plugin would find out within 30 s on its own; the test does not wait for that.
+  wp('transient', 'delete', 'p2flux_ap_ch_down_test')
 })
 await check('a cached challenge still answers 402 while P2Flux is briefly unreachable', async () => {
   assert.equal((await get(rel(paid.url))).status, 402)
@@ -417,6 +419,43 @@ await check('setup check: an agent is asked to pay - and it says so when a cache
   wp('option', 'update', 'p2flux_ap_fake', '{}', '--format=json')
   assert.equal(cached.ok, false, cached.message)
   assert.match(cached.message, /cache/i)
+})
+
+// --- what comes back from P2Flux is checked too -------------------------------------------------------
+await check('an answer header that is not base64 never reaches the agent', async () => {
+  const r = await get(rel(paid.url), { payment: pay('junkheader-1') })
+  assert.equal(r.status, 200)
+  assert.equal(r.headers.get('payment-response'), null)
+  assert.equal(r.headers.get('set-cookie'), null)
+})
+await check('a LIVE site paid on the test network serves nothing - real content is never sold for test money', async () => {
+  setSettings({ environment: 'live' })
+  clearTransients()
+  const r = await get(rel(paid.url), { payment: pay('wrongnet-1') })
+  setSettings()
+  clearTransients()
+  assert.equal(r.status, 503)
+  assert.doesNotMatch(r.text, /POST-SECRET/)
+})
+await check('P2Flux down: one request asks, the next ones within 30 s do not queue behind it', async () => {
+  wp('option', 'update', 'p2flux_ap_fake', JSON.stringify({ down: true }), '--format=json')
+  clearTransients()
+  try { wp('option', 'delete', 'p2flux_ap_fake_calls') } catch {}
+  assert.equal((await get(rel(paid.url))).status, 503)
+  const asked = calls()
+  for (let i = 0; i < 3; i++) assert.equal((await get(rel(paid2.url))).status, 503)
+  assert.equal(calls(), asked, 'no new call to P2Flux while it is marked down')
+  wp('option', 'update', 'p2flux_ap_fake', '{}', '--format=json')
+  clearTransients()
+})
+await check('files: clearing the wallet removes the uploads rule; setting it again restores it', async () => {
+  wp('eval', `wp_set_current_user(1); P2Flux_AP_Files::save( array( 'ID' => ${paidFile.id} ), array( 'p2flux_ap_price' => '0.3' ) );`)
+  assert.match(readFileSync(HTACCESS, 'utf8'), /RewriteRule/)
+  wp('eval', `$s = get_option( 'p2flux_ap_settings' ); $s['wallet'] = ''; update_option( 'p2flux_ap_settings', $s );`)
+  assert.doesNotMatch(readFileSync(HTACCESS, 'utf8'), /RewriteRule/)
+  setSettings()
+  assert.match(readFileSync(HTACCESS, 'utf8'), /RewriteRule/)
+  wp('eval', `wp_set_current_user(1); P2Flux_AP_Files::save( array( 'ID' => ${paidFile.id} ), array( 'p2flux_ap_price' => '' ) );`)
 })
 
 await check('uninstall removes settings, prices, log and cache; payments stay on chain', async () => {

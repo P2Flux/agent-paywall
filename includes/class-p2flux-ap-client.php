@@ -20,6 +20,16 @@ class P2Flux_AP_Client {
 	const TIMEOUT        = 10;
 
 	/**
+	 * The network a mode is paid on.
+	 *
+	 * @param string $environment test|live.
+	 * @return string CAIP-2 id.
+	 */
+	public static function network( $environment ) {
+		return 'live' === $environment ? 'eip155:8453' : 'eip155:84532';
+	}
+
+	/**
 	 * API base for an environment.
 	 *
 	 * @param string $environment test|live.
@@ -52,6 +62,10 @@ class P2Flux_AP_Client {
 			if ( is_array( $cached ) && $cached ) {
 				return $cached;
 			}
+			// P2Flux did not answer a moment ago: every agent request asking again would only queue behind it.
+			if ( false !== get_transient( 'p2flux_ap_ch_down_' . $environment ) ) {
+				return new WP_Error( 'p2flux_ap_unavailable', 'P2Flux did not answer a moment ago' );
+			}
 		}
 		$answer = self::post(
 			$environment,
@@ -62,11 +76,11 @@ class P2Flux_AP_Client {
 			),
 			self::TIMEOUT
 		);
-		if ( is_wp_error( $answer ) ) {
-			return $answer;
-		}
-		if ( empty( $answer['accepts'] ) || ! is_array( $answer['accepts'] ) ) {
-			return new WP_Error( 'p2flux_ap_unavailable', 'unexpected answer' );
+		if ( is_wp_error( $answer ) || empty( $answer['accepts'] ) || ! is_array( $answer['accepts'] ) ) {
+			if ( ! is_wp_error( $answer ) || 'p2flux_ap_unavailable' === $answer->get_error_code() ) {
+				set_transient( 'p2flux_ap_ch_down_' . $environment, 1, 30 );
+			}
+			return is_wp_error( $answer ) ? $answer : new WP_Error( 'p2flux_ap_unavailable', 'unexpected answer' );
 		}
 		$ttl = isset( $answer['ttl'] ) ? min( 3600, max( 60, (int) $answer['ttl'] ) ) : 600;
 		set_transient( $key, $answer['accepts'], $ttl );

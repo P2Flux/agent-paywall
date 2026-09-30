@@ -250,6 +250,18 @@ class P2Flux_AP_Gate {
 		if ( is_wp_error( $answer ) ) {
 			return self::unavailable( $settings );
 		}
+		// Headers from P2Flux go to the agent as they are: only if they are what they must be, base64.
+		foreach ( array( 'payment_response', 'payment_required' ) as $field ) {
+			if ( isset( $answer[ $field ] ) && ! self::is_header_value( $answer[ $field ] ) ) {
+				unset( $answer[ $field ] );
+			}
+		}
+		/*
+		Paid on the network of this site's mode, or not paid for here. A live site whose API address
+		 * was pointed elsewhere must never hand real content out for test money. */
+		if ( ! empty( $answer['paid'] ) && P2Flux_AP_Client::network( $settings['environment'] ) !== ( $answer['network'] ?? '' ) ) {
+			return self::unavailable( $settings );
+		}
 		if ( ! empty( $answer['paid'] ) ) {
 			set_transient( $key, 1, self::USED_TTL );
 			$scheme = isset( $answer['scheme'] ) ? (string) $answer['scheme'] : 'exact';
@@ -279,6 +291,16 @@ class P2Flux_AP_Gate {
 			return self::forwarded( $answer['payment_required'], $reason );
 		}
 		return self::required( $settings, $price, $url, $mime_type, $reason );
+	}
+
+	/**
+	 * A value that may be sent as an x402 header: base64, of a sane size.
+	 *
+	 * @param mixed $value Value.
+	 * @return bool
+	 */
+	private static function is_header_value( $value ) {
+		return is_string( $value ) && strlen( $value ) <= 16384 && 1 === preg_match( '/^[A-Za-z0-9+\/]+={0,2}$/', $value );
 	}
 
 	/**
