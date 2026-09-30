@@ -98,6 +98,18 @@ class P2Flux_AP_Client {
 	}
 
 	/**
+	 * Ask P2Flux to read this site's /.well-known/x402 again: it lists, updates or unlists the site
+	 * by what that document says. Best effort - the listing is also re-read daily by P2Flux.
+	 *
+	 * @param string $site        This site's address.
+	 * @param string $environment test|live.
+	 * @return array|WP_Error
+	 */
+	public static function refresh_listing( $site, $environment ) {
+		return self::post( $environment, '/x402/directory/refresh', array( 'site' => $site ), self::TIMEOUT );
+	}
+
+	/**
 	 * One JSON POST.
 	 *
 	 * @param string $environment test|live.

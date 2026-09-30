@@ -4,7 +4,7 @@ Tags: ai, paywall, x402, usdc, crypto
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 0.2.0
+Stable tag: 0.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -42,6 +42,7 @@ Fees are taken by smart contracts on the way to your wallet; P2Flux never holds 
 * Your own REST API routes can be paid too, for sites that sell data.
 * In lists, feeds, search and the REST API, agents see the price instead of the text of paid posts.
 * Earnings on the settings page: today, this month, all time, and the last payments with a link to each transaction.
+* A listing in the P2Flux directory, so AI agents looking for content to buy can find your site.
 * A test mode on Base Sepolia with test USDC, to see it work before real money moves.
 
 == Frequently Asked Questions ==
@@ -85,6 +86,7 @@ This plugin connects to the P2Flux API (https://api.p2flux.com, or https://api-t
 * When an AI agent opens a paid page: your wallet address and the price are sent, to get the payment requirement. It is cached for up to an hour.
 * When an agent sends a payment: your wallet address, the price, the address of the page and the agent's payment are sent, and P2Flux settles it on the Base network.
 * When you save the settings: your wallet address is sent, to check it.
+* If "List my site in the P2Flux directory" is ticked (it is by default): your site address is sent, and P2Flux then reads the public document your site serves at /.well-known/x402 - site name, tagline, price, what is paid and the titles of up to ten latest paid posts - and lists it so AI agents can find you. Untick the box and the listing is removed.
 
 Nothing about your visitors is sent. P2Flux terms: https://p2flux.com/terms.html - privacy: https://p2flux.com/privacy.html
 
@@ -94,6 +96,9 @@ Nothing about your visitors is sent. P2Flux terms: https://p2flux.com/terms.html
 2. The price box in the editor.
 
 == Changelog ==
+
+= 0.3.0 =
+* P2Flux directory: AI agents can find your site (on by default, one checkbox to leave).
 
 = 0.2.0 =
 * Prepaid balance (x402 batch settlement): agents pay each page without a transaction; payouts at 2 USDC or weekly, 3%.

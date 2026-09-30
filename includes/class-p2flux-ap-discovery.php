@@ -12,6 +12,8 @@ defined( 'ABSPATH' ) || exit;
  */
 class P2Flux_AP_Discovery {
 
+	const REFRESH_HOOK = 'p2flux_ap_refresh_listing';
+
 	/**
 	 * Hooks.
 	 *
@@ -19,6 +21,59 @@ class P2Flux_AP_Discovery {
 	 */
 	public static function register() {
 		add_action( 'parse_request', array( __CLASS__, 'maybe_serve' ), 0 );
+		add_action( self::REFRESH_HOOK, array( __CLASS__, 'announce' ) );
+		if ( ! wp_next_scheduled( self::REFRESH_HOOK ) ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'weekly', self::REFRESH_HOOK );
+		}
+	}
+
+	/**
+	 * Tell P2Flux to read this site's document again - after the settings change, and weekly.
+	 * P2Flux decides from the document alone: listed when it says so, removed when it says not.
+	 *
+	 * @return void
+	 */
+	public static function announce() {
+		$s = P2Flux_AP_Settings::get();
+		if ( '' === $s['wallet'] ) {
+			return;
+		}
+		P2Flux_AP_Client::refresh_listing( home_url(), $s['environment'] );
+	}
+
+	/**
+	 * Up to ten latest paid posts: title, address, price. Nothing an agent does not already get in a list.
+	 *
+	 * @param array $s Settings.
+	 * @return array
+	 */
+	private static function samples( array $s ) {
+		$out   = array();
+		$types = $s['paid_post_types'] ? $s['paid_post_types'] : array( 'post' );
+		$posts = get_posts(
+			array(
+				'post_type'        => $types,
+				'post_status'      => 'publish',
+				'numberposts'      => 30,
+				'has_password'     => false,
+				'suppress_filters' => false,
+			)
+		);
+		foreach ( $posts as $post ) {
+			$price = P2Flux_AP_Gate::price_of( $post );
+			if ( null === $price ) {
+				continue;
+			}
+			$out[] = array(
+				'title' => wp_strip_all_tags( get_the_title( $post ) ),
+				'url'   => get_permalink( $post ),
+				'price' => $price,
+			);
+			if ( count( $out ) >= 10 ) {
+				break;
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -59,7 +114,10 @@ class P2Flux_AP_Discovery {
 		return array(
 			'x402Version' => 2,
 			'name'        => get_bloginfo( 'name' ),
+			'description' => get_bloginfo( 'description' ),
 			'url'         => home_url( '/' ),
+			'directory'   => 'yes' === $s['directory'],
+			'samples'     => 'yes' === $s['directory'] ? self::samples( $s ) : array(),
 			'price'       => $s['default_price'],
 			'currency'    => 'USDC',
 			'paid'        => array(

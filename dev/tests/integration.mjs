@@ -31,7 +31,7 @@ try { wp('option', 'delete', 'p2flux_ap_fake_calls') } catch {}
 wp('db', 'query', "DELETE FROM wp_options WHERE option_name LIKE 'p2flux\\_ap\\_fake\\_used\\_%'")
 clearTransients()
 wp('eval', `global $wpdb; $wpdb->query("TRUNCATE {$wpdb->prefix}p2flux_ap_payments");`)
-const settings = { wallet: WALLET, environment: 'test', default_price: '0.05', paid_post_types: ['post'], paid_categories: [], paid_routes: ['/paid/v1/'], api_down: 'refuse', prepaid: 'yes' }
+const settings = { wallet: WALLET, environment: 'test', default_price: '0.05', paid_post_types: ['post'], paid_categories: [], paid_routes: ['/paid/v1/'], api_down: 'refuse', prepaid: 'yes', directory: 'yes' }
 const setSettings = (over = {}) => wp('option', 'update', 'p2flux_ap_settings', JSON.stringify({ ...settings, ...over }), '--format=json')
 setSettings()
 for (const id of wp('post', 'list', '--post_type=post,page', '--format=ids').split(' ').filter(Boolean)) wp('post', 'delete', id, '--force')
@@ -238,6 +238,29 @@ await check('a cached challenge still answers 402 while P2Flux is briefly unreac
 })
 
 // --- discovery, settings, uninstall ------------------------------------------------------------------
+await check('directory: the document lists the latest paid posts; saving the settings tells P2Flux to read it', async () => {
+  try { wp('option', 'delete', 'p2flux_ap_fake_refreshes') } catch {}
+  setSettings({ default_price: '0.06' })
+  setSettings()
+  const seen = JSON.parse(wp('option', 'get', 'p2flux_ap_fake_refreshes', '--format=json'))
+  assert.ok(seen.length >= 1 && seen.every((s) => s === SITE), JSON.stringify(seen))
+  const d = JSON.parse((await get('/.well-known/x402', { ua: CHROME })).text)
+  assert.equal(d.directory, true)
+  assert.ok(d.samples.length >= 2)
+  const titles = d.samples.map((s) => s.title)
+  assert.ok(titles.includes('Paid post') && !titles.includes('Free post') && !titles.includes('Free page'), JSON.stringify(titles))
+  assert.ok(d.samples.every((s) => s.url.startsWith(SITE) && /^\d+(\.\d+)?$/.test(s.price)))
+  assert.doesNotMatch(JSON.stringify(d), /POST-SECRET/, 'titles and prices only, never the text')
+})
+await check('directory: unticked, the document says so and lists no posts - P2Flux removes the site', async () => {
+  try { wp('option', 'delete', 'p2flux_ap_fake_refreshes') } catch {}
+  setSettings({ directory: 'no' })
+  const d = JSON.parse((await get('/.well-known/x402', { ua: CHROME })).text)
+  assert.equal(d.directory, false)
+  assert.deepEqual(d.samples, [])
+  assert.ok(JSON.parse(wp('option', 'get', 'p2flux_ap_fake_refreshes', '--format=json')).length >= 1, 'P2Flux is told to re-read')
+  setSettings()
+})
 await check('/.well-known/x402 says what is paid and for how much', async () => {
   const r = await get('/.well-known/x402', { ua: CHROME })
   assert.equal(r.status, 200)

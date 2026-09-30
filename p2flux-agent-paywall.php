@@ -3,7 +3,7 @@
  * Plugin Name:       P2Flux Agent Paywall
  * Plugin URI:        https://p2flux.com
  * Description:       Get paid in USDC when AI agents read your site. Humans see your site as always; AI agents pay per page with x402, straight to your wallet.
- * Version:           0.2.0
+ * Version:           0.3.0
  * Requires at least: 6.5
  * Requires PHP:      8.1
  * Author:            P2Flux
@@ -17,7 +17,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'P2FLUX_AP_VERSION', '0.2.0' );
+define( 'P2FLUX_AP_VERSION', '0.3.0' );
 define( 'P2FLUX_AP_FILE', __FILE__ );
 define( 'P2FLUX_AP_DIR', __DIR__ );
 

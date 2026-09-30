@@ -30,6 +30,7 @@ class P2Flux_AP_Settings {
 			'paid_routes'     => array(),
 			'api_down'        => 'refuse',
 			'prepaid'         => 'yes',
+			'directory'       => 'yes',
 		);
 	}
 
@@ -49,6 +50,8 @@ class P2Flux_AP_Settings {
 	 * @return void
 	 */
 	public static function register() {
+		add_action( 'update_option_' . self::OPTION, array( 'P2Flux_AP_Discovery', 'announce' ), 10, 0 );
+		add_action( 'add_option_' . self::OPTION, array( 'P2Flux_AP_Discovery', 'announce' ), 10, 0 );
 		add_action( 'admin_menu', array( __CLASS__, 'menu' ) );
 		add_action( 'admin_init', array( __CLASS__, 'register_setting' ) );
 		add_filter( 'plugin_action_links_' . plugin_basename( P2FLUX_AP_FILE ), array( __CLASS__, 'action_links' ) );
@@ -112,6 +115,7 @@ class P2Flux_AP_Settings {
 		$clean['environment'] = ( isset( $input['environment'] ) && 'live' === $input['environment'] ) ? 'live' : 'test';
 		$clean['api_down']    = ( isset( $input['api_down'] ) && 'free' === $input['api_down'] ) ? 'free' : 'refuse';
 		$clean['prepaid']     = ( isset( $input['prepaid'] ) && 'yes' === $input['prepaid'] ) ? 'yes' : 'no';
+		$clean['directory']   = ( isset( $input['directory'] ) && 'yes' === $input['directory'] ) ? 'yes' : 'no';
 
 		$price = P2Flux_AP_Rules::normalise_price( isset( $input['default_price'] ) ? sanitize_text_field( (string) $input['default_price'] ) : '' );
 		if ( null === $price ) {
@@ -261,6 +265,14 @@ class P2Flux_AP_Settings {
 							<input type="hidden" name="<?php echo esc_attr( $name ); ?>[prepaid]" value="no">
 							<label><input type="checkbox" name="<?php echo esc_attr( $name ); ?>[prepaid]" value="yes" <?php checked( $s['prepaid'], 'yes' ); ?>> <?php esc_html_e( 'Let agents pay from a prepaid balance (recommended)', 'p2flux-agent-paywall' ); ?></label>
 							<p class="description"><?php esc_html_e( 'An agent puts at least 1 USDC aside once, then pays each page without a transaction - cheaper and faster for small prices. You receive the money in one payout when it reaches 2 USDC, or weekly, less 3%. Pay-per-page stays available for every agent.', 'p2flux-agent-paywall' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Be found', 'p2flux-agent-paywall' ); ?></th>
+						<td>
+							<input type="hidden" name="<?php echo esc_attr( $name ); ?>[directory]" value="no">
+							<label><input type="checkbox" name="<?php echo esc_attr( $name ); ?>[directory]" value="yes" <?php checked( $s['directory'], 'yes' ); ?>> <?php esc_html_e( 'List my site in the P2Flux directory so AI agents can find it (recommended)', 'p2flux-agent-paywall' ); ?></label>
+							<p class="description"><?php esc_html_e( 'Listed: your site name, tagline, address, price, and the titles of your latest paid posts - what anyone can already see. Your site must be public and use https. Untick to be removed.', 'p2flux-agent-paywall' ); ?></p>
 						</td>
 					</tr>
 					<tr>

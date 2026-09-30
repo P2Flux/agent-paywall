@@ -17,8 +17,15 @@ add_filter(
 	'pre_http_request',
 	static function ( $pre, $args, $url ) {
 		$fake = get_option( 'p2flux_ap_fake' );
-		if ( ! is_array( $fake ) || 0 !== strpos( $url, 'https://api-test.p2flux.com/x402/paywall/' ) ) {
+		if ( ! is_array( $fake ) || 0 !== strpos( $url, 'https://api-test.p2flux.com/x402/' ) ) {
 			return $pre;
+		}
+		if ( str_ends_with( $url, '/directory/refresh' ) ) {
+			$sent   = json_decode( $args['body'], true );
+			$seen   = (array) get_option( 'p2flux_ap_fake_refreshes', array() );
+			$seen[] = (string) ( $sent['site'] ?? '' );
+			update_option( 'p2flux_ap_fake_refreshes', $seen, false );
+			return array( 'headers' => array(), 'body' => '{"listed":true}', 'response' => array( 'code' => 200, 'message' => '' ), 'cookies' => array() );
 		}
 		$calls   = (array) get_option( 'p2flux_ap_fake_calls', array() );
 		$calls[] = basename( $url );
