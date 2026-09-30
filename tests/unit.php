@@ -119,6 +119,7 @@ $agents = array(
 	'Mozilla/5.0 (compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)',
 	'CCBot/2.0 (https://commoncrawl.org/faq/)',
 	'meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)',
+	'P2Flux-MCP/0.1 (+https://p2flux.com)',
 	'python-requests/2.32.3',
 	'python-httpx/0.27.0',
 	'axios/1.7.2',

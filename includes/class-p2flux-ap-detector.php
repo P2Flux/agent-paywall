@@ -51,6 +51,9 @@ class P2Flux_AP_Detector {
 		'Kangaroo Bot',
 		'PanguBot',
 		'Novellum',
+		// Agents that pay: they say who they are.
+		'P2Flux-MCP',
+		'x402',
 		// Programs, not browsers: agent frameworks send these.
 		'python-requests',
 		'python-httpx',
