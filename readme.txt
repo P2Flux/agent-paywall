@@ -77,7 +77,7 @@ A cache that stores whole pages may serve a paid post to an agent before WordPre
 
 = Are images and files protected? =
 
-Files you give a price are. Open the file in the Media Library and fill in "Price for AI agents". WordPress does not see requests for uploaded files, so the plugin writes a rule into the uploads folder (.htaccess, for Apache and LiteSpeed) that sends AI agents' requests through WordPress. On nginx, add the rule from the guide to your server configuration; until then the paid address of a file is `/?p2flux_ap_file=<id>`. Images inside a paid post are not paid unless you give them a price.
+Files you give a price are. Open the file in the Media Library and fill in "Price for AI agents". WordPress does not see requests for uploaded files, so the plugin writes a rule into the uploads folder (.htaccess, for Apache and LiteSpeed) that sends AI agents' requests for the priced files - and no others - through WordPress. On nginx, add the rule from the guide to your server configuration; until then the paid address of a file is `/?p2flux_ap_file=<id>`. Images inside a paid post are not paid unless you give them a price.
 
 = Can an agent get its unused prepaid balance back? =
 

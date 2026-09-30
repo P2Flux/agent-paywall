@@ -5,7 +5,7 @@
 import { execFileSync } from 'node:child_process'
 import assert from 'node:assert/strict'
 import { createHash, generateKeyPairSync, sign as edSign } from 'node:crypto'
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -38,7 +38,7 @@ wp('eval', `global $wpdb; $wpdb->query("TRUNCATE {$wpdb->prefix}p2flux_ap_paymen
 const settings = { wallet: WALLET, environment: 'test', default_price: '0.05', paid_post_types: ['post'], paid_categories: [], paid_routes: ['/paid/v1/'], api_down: 'refuse', prepaid: 'yes', directory: 'yes' }
 const setSettings = (over = {}) => wp('option', 'update', 'p2flux_ap_settings', JSON.stringify({ ...settings, ...over }), '--format=json')
 setSettings()
-for (const id of wp('post', 'list', '--post_type=post,page', '--format=ids').split(' ').filter(Boolean)) wp('post', 'delete', id, '--force')
+for (const id of wp('post', 'list', '--post_type=post,page,attachment', '--post_status=any', '--format=ids').split(' ').filter(Boolean)) wp('post', 'delete', id, '--force')
 const mk = (type, title, content, meta) => {
   const id = wp('post', 'create', `--post_type=${type}`, `--post_title=${title}`, `--post_content=${content}`, '--post_status=publish', '--porcelain')
   if (meta !== undefined) wp('post', 'meta', 'update', id, '_p2flux_ap_price', meta)
@@ -307,7 +307,8 @@ await check('files: a price on a file writes the web server rule; the price is s
   const out = wp('eval', `wp_set_current_user(1); P2Flux_AP_Files::save( array( 'ID' => ${paidFile.id} ), array( 'p2flux_ap_price' => '0,30' ) ); echo get_post_meta( ${paidFile.id}, '_p2flux_ap_price', true );`)
   assert.equal(out, '0.3')
   const rule = readFileSync(HTACCESS, 'utf8')
-  assert.match(rule, /# BEGIN P2Flux Agent Paywall[\s\S]*GPTBot[\s\S]*RewriteRule \^\(\.\+\)\$ \/index\.php\?p2flux_ap_file=\$1 \[L,QSA\][\s\S]*# END P2Flux Agent Paywall/)
+  assert.match(rule, /# BEGIN P2Flux Agent Paywall[\s\S]*GPTBot[\s\S]*RewriteRule \^\(\(\?:.*paid\\-data.*\)\)\$ \/index\.php\?p2flux_ap_file=\$1 \[L,QSA\][\s\S]*# END P2Flux Agent Paywall/)
+  assert.doesNotMatch(rule, /free\\?-data/, 'only priced files are in the rule')
 })
 await check('files: an agent asking for a paid file gets 402 with its price, not the file', async () => {
   const r = await get(rel(paidFile.url))
@@ -336,8 +337,11 @@ await check('files: a person downloads a paid file as always; an agent a file wi
   assert.equal(agent.status, 200)
   assert.equal(agent.text, 'FREE-FILE,1\n')
 })
-await check('files: nothing outside the uploads folder, and no PHP, is ever sent', async () => {
-  for (const p of ['../../wp-config.php', '..%2F..%2Fwp-config.php', '../index.php', '.htaccess', '/etc/passwd', 'nope.csv', '99999999']) {
+await check('files: only priced Media Library files are ever sent - nothing outside uploads, no PHP, no file of another plugin, no file without a price', async () => {
+  // A file another plugin keeps in uploads and protects itself: this plugin must not become a way around that.
+  mkdirSync(`${PATH}/wp-content/uploads/woocommerce_uploads`, { recursive: true })
+  writeFileSync(`${PATH}/wp-content/uploads/woocommerce_uploads/secret.csv`, 'OTHER-PLUGIN-SECRET\n')
+  for (const p of ['../../wp-config.php', '..%2F..%2Fwp-config.php', '../index.php', '.htaccess', '/etc/passwd', 'nope.csv', '99999999', 'woocommerce_uploads/secret.csv', freeFile.id, freeFile.url.split('/uploads/')[1]]) {
     const r = await get(`/?p2flux_ap_file=${p}`)
     assert.equal(r.status, 404, p)
     assert.equal(r.text, '', p)

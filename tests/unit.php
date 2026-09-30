@@ -163,8 +163,16 @@ echo "web server rule for paid files\n";
 $pattern = P2Flux_AP_Detector::pattern( array( 'GPTBot', 'curl/', 'Kangaroo Bot', 'a.b', 'x(y)|.*', '', null ) );
 check( 'signatures become one expression; dots and spaces escaped; anything that could change the rule dropped', 'GPTBot|curl/|Kangaroo\\ Bot|a\\.b' === $pattern, $pattern );
 check( 'every built-in signature is in the rule', count( explode( '|', P2Flux_AP_Detector::pattern() ) ) === count( P2Flux_AP_Detector::SIGNATURES ) );
-$rules = implode( "\n", P2Flux_AP_Files::rules( '/blog/index.php', 'GPTBot' ) );
-check( 'the rule sends agents, empty user agents, signed and paying requests through WordPress', false !== strpos( $rules, '(GPTBot) [NC,OR]' ) && false !== strpos( $rules, '^$ [OR]' ) && false !== strpos( $rules, 'Signature-Agent' ) && false !== strpos( $rules, 'RewriteRule ^(.+)$ /blog/index.php?p2flux_ap_file=$1 [L,QSA]' ), $rules );
+$rules = implode( "\n", P2Flux_AP_Files::rules( '/blog/index.php', 'GPTBot', array( '2026/09/fish-prices.csv', 'photo.jpg' ) ) );
+check( 'the rule sends agents, empty user agents, signed and paying requests for the PRICED files through WordPress', false !== strpos( $rules, '(GPTBot) [NC,OR]' ) && false !== strpos( $rules, '^$ [OR]' ) && false !== strpos( $rules, 'Signature-Agent' ) && false !== strpos( $rules, ')$ /blog/index.php?p2flux_ap_file=$1 [L,QSA]' ), $rules );
+preg_match( '#^RewriteRule \^(.+)\$ #m', $rules, $rule );
+$hits = static fn( $path ) => 1 === preg_match( '#^' . $rule[1] . '$#', $path );
+check( 'a priced file and the image sizes made of it match the rule', $hits( '2026/09/fish-prices.csv' ) && $hits( 'photo.jpg' ) && $hits( 'photo-300x200.jpg' ) && $hits( 'photo-scaled.jpg' ) );
+check( 'no other file does: another name, another folder, a longer name, another plugin\'s files', ! $hits( '2026/09/other.csv' ) && ! $hits( '2026/10/fish-prices.csv' ) && ! $hits( 'photo.jpg.php' ) && ! $hits( 'xphoto.jpg' ) && ! $hits( 'woocommerce_uploads/secret.pdf' ) && ! $hits( '2026/09/fish-pricesXcsv' ) );
+check( 'no priced files, no rule at all', array() === P2Flux_AP_Files::rules( '/index.php', 'GPTBot', array() ) );
+check( 'a path that could change the rule is left out', array() === P2Flux_AP_Files::rules( '/index.php', 'GPTBot', array( 'a b.pdf', '../x.pdf', 'a(b|c).pdf', "a\n.pdf", 'noextension', null ) ) );
+$many = P2Flux_AP_Files::rules( '/index.php', 'GPTBot', array_map( static fn( $i ) => "2026/09/file-{$i}.pdf", range( 1, 60 ) ) );
+check( 'many files: several rules, each with its conditions, no line too long for Apache', 3 === count( preg_grep( '/^RewriteRule/', $many ) ) && 3 === count( preg_grep( '/Payment-Signature/', $many ) ) && max( array_map( 'strlen', $many ) ) < 8000 );
 
 echo "web bot auth\n";
 check( 'key name: the RFC 8037 thumbprint example', 'kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k' === P2Flux_AP_Botauth::thumbprint( '11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo' ) );
