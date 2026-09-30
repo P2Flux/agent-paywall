@@ -256,9 +256,9 @@ class P2Flux_AP_Gate {
 				unset( $answer[ $field ] );
 			}
 		}
-		/*
-		Paid on the network of this site's mode, or not paid for here. A live site whose API address
-		 * was pointed elsewhere must never hand real content out for test money. */
+
+		// Paid on the network of this site's mode, or not paid for here. A live site whose API address
+		// was pointed elsewhere must never hand real content out for test money.
 		if ( ! empty( $answer['paid'] ) && P2Flux_AP_Client::network( $settings['environment'] ) !== ( $answer['network'] ?? '' ) ) {
 			return self::unavailable( $settings );
 		}
