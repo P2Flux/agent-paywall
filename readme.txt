@@ -4,7 +4,7 @@ Tags: ai, paywall, x402, usdc, crypto
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 0.3.0
+Stable tag: 0.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -39,10 +39,14 @@ Fees are taken by smart contracts on the way to your wallet; P2Flux never holds 
 **What you get**
 
 * A price for all posts, for chosen categories, or per post (a box in the editor). 0 makes a post free.
+* Files in the Media Library can have a price too - a PDF, a dataset, an image.
 * Your own REST API routes can be paid too, for sites that sell data.
 * In lists, feeds, search and the REST API, agents see the price instead of the text of paid posts.
 * Earnings on the settings page: today, this month, all time, and the last payments with a link to each transaction.
 * A listing in the P2Flux directory, so AI agents looking for content to buy can find your site.
+* "Check my setup": one button that opens your newest paid post as an AI agent would, and tells you if a page cache or CDN is giving it away.
+* Agents that sign their requests (Web Bot Auth, used by ChatGPT agent and others) are recognised whatever their user agent says, and named in your payment list.
+* For your own AI assistant (WordPress 6.9+, Abilities API): "what did agents pay me this month?", "make this post cost 0.10".
 * A test mode on Base Sepolia with test USDC, to see it work before real money moves.
 
 == Frequently Asked Questions ==
@@ -53,7 +57,7 @@ No. People with a browser, logged-in users and search engines (Google, Bing, App
 
 = How does the plugin know a request comes from an AI agent? =
 
-The request carries an x402 payment, or its user agent names an AI crawler (GPTBot, ClaudeBot, PerplexityBot and others) or a program rather than a browser. The list can be changed with the `p2flux_ap_agent_signatures` filter. A bot that pretends to be a normal browser is not detected; it reads your site as it does today.
+The request carries an x402 payment, signs itself as a bot (Web Bot Auth), or its user agent names an AI crawler (GPTBot, ClaudeBot, PerplexityBot and others) or a program rather than a browser. The list can be changed with the `p2flux_ap_agent_signatures` filter. A bot that pretends to be a normal browser is not detected; it reads your site as it does today.
 
 = Which wallet do I need? =
 
@@ -69,11 +73,19 @@ You choose: agents are asked to come back later (default), or they read for free
 
 = I use a page cache or a CDN. =
 
-A cache that stores whole pages may serve a paid post to an agent before WordPress runs. The plugin marks every answer to an agent as not cacheable, but a CDN that caches by URL only must be told to bypass requests from AI crawlers, or paid posts must be excluded from its cache.
+A cache that stores whole pages may serve a paid post to an agent before WordPress runs. The plugin marks every answer to an agent as not cacheable and tells WP Rocket to skip AI agents. Other page caches and CDNs that cache whole pages must be told to bypass requests from AI crawlers. Press "Check my setup" on the settings page: it tells you whether an agent is asked to pay. The steps for common caches and CDNs: https://p2flux.com/docs/agent-paywall.html#caches
 
 = Are images and files protected? =
 
-Not in this version. WordPress serves uploaded files directly, without PHP; protecting them needs web server rules.
+Files you give a price are. Open the file in the Media Library and fill in "Price for AI agents". WordPress does not see requests for uploaded files, so the plugin writes a rule into the uploads folder (.htaccess, for Apache and LiteSpeed) that sends AI agents' requests through WordPress. On nginx, add the rule from the guide to your server configuration; until then the paid address of a file is `/?p2flux_ap_file=<id>`. Images inside a paid post are not paid unless you give them a price.
+
+= Can an agent get its unused prepaid balance back? =
+
+Yes, at any time, by asking (the x402 refund request); your site passes the request to P2Flux, which returns the balance to the agent's wallet. What the agent already spent is yours.
+
+= What is Web Bot Auth? =
+
+A way for an AI agent to prove who it is: it signs each request, and publishes its keys. The plugin checks the signature (Ed25519) when the agent pays and shows the agent's name next to the payment. For this it reads the agent's public key list from the agent's own site. It never lets anyone read for free.
 
 = Is this a payment service? Who holds the money? =
 
@@ -88,14 +100,26 @@ This plugin connects to the P2Flux API (https://api.p2flux.com, or https://api-t
 * When you save the settings: your wallet address is sent, to check it.
 * If "List my site in the P2Flux directory" is ticked (it is by default): your site address is sent, and P2Flux then reads the public document your site serves at /.well-known/x402 - site name, tagline, price, what is paid and the titles of up to ten latest paid posts - and lists it so AI agents can find you. Untick the box and the listing is removed.
 
+When an AI agent that signs its requests (Web Bot Auth) pays, the plugin reads that agent's public keys from the address the agent names (https://<agent>/.well-known/http-message-signatures-directory), to check the signature. Nothing is sent there but the request itself; the keys are cached for an hour.
+
 Nothing about your visitors is sent. P2Flux terms: https://p2flux.com/terms.html - privacy: https://p2flux.com/privacy.html
 
 == Screenshots ==
 
 1. The settings page: wallet, price, what agents pay for, earnings.
-2. The price box in the editor.
+2. Earnings and the last payments.
+3. The price box in the editor.
+4. A price on a file in the Media Library.
+5. What an AI agent gets: 402 Payment Required with the price.
 
 == Changelog ==
+
+= 0.4.0 =
+* Paid files: a price for AI agents on any file in the Media Library.
+* "Check my setup": see at once whether a page cache or CDN serves paid posts to agents. WP Rocket is told to skip agents.
+* Web Bot Auth: agents that sign their requests are recognised and named in the payment list.
+* Abilities (WordPress 6.9+): earnings, settings and post prices for the owner's own AI assistant.
+* An agent's request to take back its unused prepaid balance is passed on and answered.
 
 = 0.3.0 =
 * P2Flux directory: AI agents can find your site (on by default, one checkbox to leave).

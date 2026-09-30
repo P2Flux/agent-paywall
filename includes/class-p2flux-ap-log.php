@@ -12,7 +12,7 @@ defined( 'ABSPATH' ) || exit;
  */
 class P2Flux_AP_Log {
 
-	const DB_VERSION = '2';
+	const DB_VERSION = '3';
 	const PRUNE_HOOK = 'p2flux_ap_prune';
 	/** Rows older than this are deleted daily. */
 	const KEEP_DAYS = 400;
@@ -48,6 +48,7 @@ class P2Flux_AP_Log {
 				tx char(66) NOT NULL,
 				network varchar(32) NOT NULL DEFAULT '',
 				scheme varchar(32) NOT NULL DEFAULT 'exact',
+				agent varchar(100) NOT NULL DEFAULT '',
 				PRIMARY KEY  (id),
 				UNIQUE KEY tx (tx),
 				KEY created_at (created_at)
@@ -81,9 +82,10 @@ class P2Flux_AP_Log {
 	 * @param string $tx      Transaction hash, or the receipt of a prepaid request.
 	 * @param string $network CAIP-2 network.
 	 * @param string $scheme  exact | batch-settlement.
+	 * @param string $agent   Who paid, when it proved it (Web Bot Auth), e.g. "chatgpt.com".
 	 * @return void
 	 */
-	public static function insert( $post_id, $url, $amount, $payer, $tx, $network, $scheme = 'exact' ) {
+	public static function insert( $post_id, $url, $amount, $payer, $tx, $network, $scheme = 'exact', $agent = '' ) {
 		global $wpdb;
 		if ( ! preg_match( '/^0x[0-9a-fA-F]{64}$/', (string) $tx ) ) {
 			return;
@@ -91,7 +93,7 @@ class P2Flux_AP_Log {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table, one insert.
 		$wpdb->query(
 			$wpdb->prepare(
-				'INSERT IGNORE INTO %i (created_at, post_id, url, amount, payer, tx, network, scheme) VALUES (%s, %d, %s, %d, %s, %s, %s, %s)',
+				'INSERT IGNORE INTO %i (created_at, post_id, url, amount, payer, tx, network, scheme, agent) VALUES (%s, %d, %s, %d, %s, %s, %s, %s, %s)',
 				self::table(),
 				gmdate( 'Y-m-d H:i:s' ),
 				(int) $post_id,
@@ -100,7 +102,8 @@ class P2Flux_AP_Log {
 				preg_match( '/^0x[0-9a-fA-F]{40}$/', (string) $payer ) ? $payer : '',
 				$tx,
 				substr( (string) $network, 0, 32 ),
-				'batch-settlement' === $scheme ? 'batch-settlement' : 'exact'
+				'batch-settlement' === $scheme ? 'batch-settlement' : 'exact',
+				substr( (string) $agent, 0, 100 )
 			)
 		);
 	}

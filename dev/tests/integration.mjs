@@ -4,6 +4,10 @@
 //   node dev/tests/integration.mjs
 import { execFileSync } from 'node:child_process'
 import assert from 'node:assert/strict'
+import { createHash, generateKeyPairSync, sign as edSign } from 'node:crypto'
+import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const SITE = process.env.WP_URL || 'http://localhost:8082'
 const PATH = `${process.env.HOME}/projects/p2flux_wp_paywall`
@@ -15,8 +19,8 @@ const GOOGLE = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/b
 const wp = (...args) => execFileSync('wp', [`--path=${PATH}`, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
 const b64 = (v) => Buffer.from(JSON.stringify(v)).toString('base64')
 const pay = (id, extra = {}) => b64({ id, ...extra })
-const get = async (path, { ua = GPT, payment, method = 'GET' } = {}) => {
-  const headers = { 'user-agent': ua }
+const get = async (path, { ua = GPT, payment, method = 'GET', extra = {} } = {}) => {
+  const headers = { 'user-agent': ua, ...extra }
   if (payment !== undefined) headers['payment-signature'] = payment
   const res = await fetch(path.startsWith('http') ? path : SITE + path, { method, headers, redirect: 'manual' })
   return { status: res.status, headers: res.headers, text: await res.text() }
@@ -280,6 +284,137 @@ await check('settings refuse a wallet P2Flux rejects and keep the old one', asyn
   assert.deepEqual(c.paid_post_types, ['post'])
   assert.deepEqual(c.paid_routes, ['/shop/v1/'])
 })
+// --- prepaid balance taken back ----------------------------------------------------------------------
+await check('a refund of the prepaid balance: the receipt, no content, nothing logged', async () => {
+  const before = wp('db', 'query', 'SELECT COUNT(*) FROM wp_p2flux_ap_payments', '--skip-column-names')
+  const r = await get(rel(paid.url), { payment: pay('refund-1') })
+  assert.equal(r.status, 200)
+  assert.doesNotMatch(r.text, /POST-SECRET/)
+  assert.deepEqual(JSON.parse(r.text), { refunded: true })
+  assert.equal(decode(r.headers.get('payment-response')).amount, '900000')
+  assert.equal(wp('db', 'query', 'SELECT COUNT(*) FROM wp_p2flux_ap_payments', '--skip-column-names'), before)
+})
+
+// --- paid files --------------------------------------------------------------------------------------
+const dir = mkdtempSync(join(tmpdir(), 'p2flux-ap-'))
+writeFileSync(join(dir, 'paid-data.csv'), 'FILE-SECRET-7,1,2,3\n')
+writeFileSync(join(dir, 'free-data.csv'), 'FREE-FILE,1\n')
+const media = (name) => { const id = wp('media', 'import', join(dir, name), '--porcelain'); return { id, url: wp('eval', `echo wp_get_attachment_url(${id});`) } }
+const paidFile = media('paid-data.csv')
+const freeFile = media('free-data.csv')
+const HTACCESS = `${PATH}/wp-content/uploads/.htaccess`
+await check('files: a price on a file writes the web server rule; the price is set as the owner would', async () => {
+  const out = wp('eval', `wp_set_current_user(1); P2Flux_AP_Files::save( array( 'ID' => ${paidFile.id} ), array( 'p2flux_ap_price' => '0,30' ) ); echo get_post_meta( ${paidFile.id}, '_p2flux_ap_price', true );`)
+  assert.equal(out, '0.3')
+  const rule = readFileSync(HTACCESS, 'utf8')
+  assert.match(rule, /# BEGIN P2Flux Agent Paywall[\s\S]*GPTBot[\s\S]*RewriteRule \^\(\.\+\)\$ \/index\.php\?p2flux_ap_file=\$1 \[L,QSA\][\s\S]*# END P2Flux Agent Paywall/)
+})
+await check('files: an agent asking for a paid file gets 402 with its price, not the file', async () => {
+  const r = await get(rel(paidFile.url))
+  assert.equal(r.status, 402)
+  assert.doesNotMatch(r.text, /FILE-SECRET/)
+  const req = decode(r.headers.get('payment-required'))
+  assert.equal(req.accepts[0].amount, '300000')
+  assert.equal(req.resource.url, paidFile.url)
+})
+await check('files: an agent that pays gets the file, byte for byte, never cached', async () => {
+  const r = await get(rel(paidFile.url), { payment: pay('file-1', { price: '0.3' }) })
+  assert.equal(r.status, 200)
+  assert.equal(r.text, 'FILE-SECRET-7,1,2,3\n')
+  assert.match(r.headers.get('content-type'), /text\/csv/)
+  assert.match(r.headers.get('cache-control'), /no-store/)
+  assert.equal(wp('db', 'query', `SELECT amount FROM wp_p2flux_ap_payments WHERE post_id = ${paidFile.id}`, '--skip-column-names'), '300000')
+})
+await check('files: the same by its number - /?p2flux_ap_file=<id>', async () => {
+  assert.equal((await get(`/?p2flux_ap_file=${paidFile.id}`)).status, 402)
+})
+await check('files: a person downloads a paid file as always; an agent a file without a price', async () => {
+  const person = await get(rel(paidFile.url), { ua: CHROME })
+  assert.equal(person.status, 200)
+  assert.match(person.text, /FILE-SECRET-7/)
+  const agent = await get(rel(freeFile.url))
+  assert.equal(agent.status, 200)
+  assert.equal(agent.text, 'FREE-FILE,1\n')
+})
+await check('files: nothing outside the uploads folder, and no PHP, is ever sent', async () => {
+  for (const p of ['../../wp-config.php', '..%2F..%2Fwp-config.php', '../index.php', '.htaccess', '/etc/passwd', 'nope.csv', '99999999']) {
+    const r = await get(`/?p2flux_ap_file=${p}`)
+    assert.equal(r.status, 404, p)
+    assert.equal(r.text, '', p)
+  }
+})
+await check('files: the price removed, the rule is removed', async () => {
+  wp('eval', `wp_set_current_user(1); P2Flux_AP_Files::save( array( 'ID' => ${paidFile.id} ), array( 'p2flux_ap_price' => '' ) );`)
+  assert.doesNotMatch(readFileSync(HTACCESS, 'utf8'), /RewriteRule/)
+  const r = await get(rel(paidFile.url))
+  assert.equal(r.status, 200)
+})
+
+// --- agents that sign their requests (Web Bot Auth) --------------------------------------------------
+const { publicKey, privateKey } = generateKeyPairSync('ed25519')
+const jwk = publicKey.export({ format: 'jwk' })
+const keyid = createHash('sha256').update(`{"crv":"Ed25519","kty":"OKP","x":"${jwk.x}"}`).digest('base64url')
+wp('option', 'update', 'p2flux_ap_fake_jwks', JSON.stringify({ keys: [{ kty: 'OKP', crv: 'Ed25519', x: jwk.x }] }))
+const signedHeaders = (authority, agent = '"https://agent.test"') => {
+  const now = Math.floor(Date.now() / 1000)
+  const inner = `("@authority" "signature-agent");created=${now};keyid="${keyid}";alg="ed25519";expires=${now + 120};tag="web-bot-auth"`
+  const base = `"@authority": ${authority}\n"signature-agent": ${agent}\n"@signature-params": ${inner}`
+  return { 'signature-agent': agent, 'signature-input': `sig1=${inner}`, signature: `sig1=:${edSign(null, Buffer.from(base), privateKey).toString('base64')}:` }
+}
+const HOST = new URL(SITE).host
+const agentOf = (id) => wp('db', 'query', `SELECT agent FROM wp_p2flux_ap_payments WHERE tx = '0x${createHash('sha256').update(id).digest('hex')}'`, '--skip-column-names')
+await check('web bot auth: a request signed as a bot is asked to pay even with a browser user agent', async () => {
+  const r = await get(rel(paid.url), { ua: CHROME, extra: signedHeaders(HOST) })
+  assert.equal(r.status, 402)
+  assert.doesNotMatch(r.text, /POST-SECRET/)
+})
+await check('web bot auth: a verified agent is named in the payment log', async () => {
+  const r = await get(rel(paid.url), { payment: pay('signed-1'), extra: signedHeaders(HOST) })
+  assert.equal(r.status, 200)
+  assert.equal(agentOf('signed-1'), 'agent.test')
+})
+await check('web bot auth: a signature made for another site, or by an unknown key, pays but is not named', async () => {
+  assert.equal((await get(rel(paid.url), { payment: pay('signed-2'), extra: signedHeaders('other.example') })).status, 200)
+  assert.equal(agentOf('signed-2'), '')
+  wp('option', 'update', 'p2flux_ap_fake_jwks', JSON.stringify({ keys: [] }))
+  clearTransients()
+  assert.equal((await get(rel(paid.url), { payment: pay('signed-3'), extra: signedHeaders(HOST) })).status, 200)
+  assert.equal(agentOf('signed-3'), '')
+})
+
+// --- the owner's own assistant (Abilities API) and the setup check ------------------------------------
+const ability = (name, input, user = ['--user=1']) => JSON.parse(wp(...user, 'eval', `$a = wp_get_ability( 'p2flux-agent-paywall/${name}' ); $r = $a ? $a->execute( ${input} ) : 'missing'; echo wp_json_encode( is_wp_error( $r ) ? array( 'error' => $r->get_error_code() ) : $r );`))
+await check('abilities: earnings and settings for an administrator', async () => {
+  const e = ability('get-earnings', 'null')
+  assert.equal(e.currency, 'USDC')
+  assert.ok(e.all.payments >= 3 && Number(e.all.amount) > 0, JSON.stringify(e.all))
+  assert.ok(e.latest.some((p) => p.agent === 'agent.test'))
+  assert.equal(ability('get-settings', 'null').wallet, WALLET)
+})
+await check('abilities: set-post-price changes what an agent is asked', async () => {
+  const out = ability('set-post-price', `array( 'post_id' => ${paid2.id}, 'price' => '0.75' )`)
+  assert.equal(out.price, '0.75')
+  assert.equal(decode((await get(rel(paid2.url))).headers.get('payment-required')).accepts[0].amount, '750000')
+  assert.equal(ability('set-post-price', `array( 'post_id' => ${paid2.id}, 'price' => 'lots' )`).error, 'p2flux_ap_price')
+  assert.equal(ability('set-post-price', `array( 'post_id' => ${paid2.id}, 'price' => '' )`).price, '0.05')
+})
+await check('abilities: nobody but the owner - a visitor is refused', async () => {
+  for (const [name, input] of [['get-earnings', 'null'], ['get-settings', 'null'], ['set-post-price', `array( 'post_id' => ${paid2.id}, 'price' => '0' )`]]) {
+    assert.ok(ability(name, input, []).error, name)
+  }
+  assert.equal((await get(rel(paid2.url))).status, 402)
+})
+await check('setup check: an agent is asked to pay - and it says so when a cache answers instead', async () => {
+  const ok = JSON.parse(wp('eval', 'echo wp_json_encode( P2Flux_AP_Settings::cache_check() );'))
+  assert.equal(ok.ok, true, ok.message)
+  // A cache in front of the site: every request for the page gets the full page.
+  wp('option', 'update', 'p2flux_ap_fake', JSON.stringify({ cached: true }), '--format=json')
+  const cached = JSON.parse(wp('eval', 'echo wp_json_encode( P2Flux_AP_Settings::cache_check() );'))
+  wp('option', 'update', 'p2flux_ap_fake', '{}', '--format=json')
+  assert.equal(cached.ok, false, cached.message)
+  assert.match(cached.message, /cache/i)
+})
+
 await check('uninstall removes settings, prices, log and cache; payments stay on chain', async () => {
   wp('eval', `define( 'WP_UNINSTALL_PLUGIN', true ); include WP_PLUGIN_DIR . '/p2flux-agent-paywall/uninstall.php';`)
   assert.equal(wp('db', 'query', "SHOW TABLES LIKE 'wp_p2flux_ap_payments'", '--skip-column-names'), '')

@@ -12,6 +12,11 @@ global $wpdb;
 delete_option( 'p2flux_ap_settings' );
 delete_option( 'p2flux_ap_db_version' );
 delete_post_meta_by_key( '_p2flux_ap_price' );
+// The rule for paid files in the uploads folder.
+if ( is_file( wp_upload_dir()['basedir'] . '/.htaccess' ) ) {
+	require_once ABSPATH . 'wp-admin/includes/misc.php';
+	insert_with_markers( wp_upload_dir()['basedir'] . '/.htaccess', 'P2Flux Agent Paywall', array() );
+}
 wp_clear_scheduled_hook( 'p2flux_ap_prune' );
 wp_clear_scheduled_hook( 'p2flux_ap_refresh_listing' );
 // phpcs:disable WordPress.DB.DirectDatabaseQuery

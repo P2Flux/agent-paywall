@@ -54,6 +54,7 @@ class P2Flux_AP_Settings {
 		add_action( 'add_option_' . self::OPTION, array( 'P2Flux_AP_Discovery', 'announce' ), 10, 0 );
 		add_action( 'admin_menu', array( __CLASS__, 'menu' ) );
 		add_action( 'admin_init', array( __CLASS__, 'register_setting' ) );
+		add_action( 'admin_post_p2flux_ap_check', array( __CLASS__, 'check' ) );
 		add_filter( 'plugin_action_links_' . plugin_basename( P2FLUX_AP_FILE ), array( __CLASS__, 'action_links' ) );
 	}
 
@@ -165,6 +166,81 @@ class P2Flux_AP_Settings {
 	}
 
 	/**
+	 * Does an agent really get asked to pay? Opens the newest paid post the way a person does, then
+	 * the way an AI crawler does - through whatever page cache or CDN stands in front of the site.
+	 *
+	 * @return array{ok: bool|null, message: string}
+	 */
+	public static function cache_check() {
+		$url   = '';
+		$posts = get_posts(
+			array(
+				'post_type'    => 'any',
+				'post_status'  => 'publish',
+				'numberposts'  => 30,
+				'has_password' => false,
+			)
+		);
+		foreach ( $posts as $post ) {
+			if ( null !== P2Flux_AP_Gate::price_of( $post ) ) {
+				$url = get_permalink( $post );
+				break;
+			}
+		}
+		if ( '' === $url ) {
+			return array(
+				'ok'      => null,
+				'message' => __( 'Nothing is paid yet: choose what agents pay for, save, and check again.', 'p2flux-agent-paywall' ),
+			);
+		}
+		$open = static fn( $user_agent ) => wp_remote_get(
+			$url,
+			array(
+				'timeout'     => 10,
+				'redirection' => 0,
+				'user-agent'  => $user_agent,
+				'sslverify'   => apply_filters( 'https_local_ssl_verify', false ), // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- core's own filter for requests to this site.
+			)
+		);
+		$open( 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36' );
+		$code = wp_remote_retrieve_response_code( $open( 'Mozilla/5.0 (compatible; GPTBot/1.2; P2Flux setup check)' ) );
+		if ( 402 === $code ) {
+			return array(
+				'ok'      => true,
+				/* translators: %s: a page address */
+				'message' => sprintf( __( 'Working: an AI agent that opens %s is asked to pay.', 'p2flux-agent-paywall' ), $url ),
+			);
+		}
+		if ( 200 === $code ) {
+			return array(
+				'ok'      => false,
+				/* translators: %s: a page address */
+				'message' => sprintf( __( 'An AI agent that opens %s gets the full page without paying. A page cache or CDN in front of your site is answering instead of WordPress. In your cache plugin or CDN, exclude AI user agents from cached pages - the P2Flux guide "Caches and CDNs" has the list and the steps.', 'p2flux-agent-paywall' ), $url ),
+			);
+		}
+		return array(
+			'ok'      => null,
+			/* translators: %s: an HTTP status code, or "no answer" */
+			'message' => sprintf( __( 'Could not check: the site answered its own request with "%s". If P2Flux cannot be reached right now, try again in a minute.', 'p2flux-agent-paywall' ), $code ? $code : __( 'no answer', 'p2flux-agent-paywall' ) ),
+		);
+	}
+
+	/**
+	 * The "Check my setup" button.
+	 *
+	 * @return void
+	 */
+	public static function check() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Not allowed.', 'p2flux-agent-paywall' ), 403 );
+		}
+		check_admin_referer( 'p2flux_ap_check' );
+		set_transient( 'p2flux_ap_check_' . get_current_user_id(), self::cache_check(), 60 );
+		wp_safe_redirect( admin_url( 'options-general.php?page=' . self::PAGE ) );
+		exit;
+	}
+
+	/**
 	 * A message on the settings screen.
 	 *
 	 * @param string $code    Code.
@@ -198,6 +274,14 @@ class P2Flux_AP_Settings {
 		<div class="wrap p2flux-ap">
 			<h1><?php esc_html_e( 'Agent Paywall', 'p2flux-agent-paywall' ); ?></h1>
 			<p class="p2flux-ap-lead"><?php esc_html_e( 'AI agents pay in USDC to read what you choose below. People visiting your site see it as always. Money goes straight to your wallet; P2Flux keeps 1% (at least 0.003 USDC) of each payment.', 'p2flux-agent-paywall' ); ?></p>
+
+			<?php
+			$checked = get_transient( 'p2flux_ap_check_' . get_current_user_id() );
+			if ( is_array( $checked ) ) :
+				delete_transient( 'p2flux_ap_check_' . get_current_user_id() );
+				?>
+			<div class="notice inline notice-<?php echo esc_attr( true === $checked['ok'] ? 'success' : ( false === $checked['ok'] ? 'error' : 'warning' ) ); ?>"><p><?php echo esc_html( $checked['message'] ); ?></p></div>
+			<?php endif; ?>
 
 			<?php if ( '' !== $s['wallet'] ) : ?>
 			<div class="p2flux-ap-earnings">
@@ -287,17 +371,25 @@ class P2Flux_AP_Settings {
 				<?php submit_button(); ?>
 			</form>
 
+			<?php if ( '' !== $s['wallet'] ) : ?>
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<input type="hidden" name="action" value="p2flux_ap_check">
+				<?php wp_nonce_field( 'p2flux_ap_check' ); ?>
+				<p><button type="submit" class="button"><?php esc_html_e( 'Check my setup', 'p2flux-agent-paywall' ); ?></button> <span class="description"><?php esc_html_e( 'Opens your newest paid post as an AI agent would, to see that it is asked to pay - also through your page cache or CDN.', 'p2flux-agent-paywall' ); ?></span></p>
+			</form>
+			<?php endif; ?>
+
 			<?php if ( $recent ) : ?>
 			<h2><?php esc_html_e( 'Last payments', 'p2flux-agent-paywall' ); ?></h2>
 			<table class="widefat striped">
-				<thead><tr><th><?php esc_html_e( 'Time (UTC)', 'p2flux-agent-paywall' ); ?></th><th><?php esc_html_e( 'Page', 'p2flux-agent-paywall' ); ?></th><th><?php esc_html_e( 'Amount', 'p2flux-agent-paywall' ); ?></th><th><?php esc_html_e( 'Agent wallet', 'p2flux-agent-paywall' ); ?></th><th><?php esc_html_e( 'Transaction', 'p2flux-agent-paywall' ); ?></th></tr></thead>
+				<thead><tr><th><?php esc_html_e( 'Time (UTC)', 'p2flux-agent-paywall' ); ?></th><th><?php esc_html_e( 'Page', 'p2flux-agent-paywall' ); ?></th><th><?php esc_html_e( 'Amount', 'p2flux-agent-paywall' ); ?></th><th><?php esc_html_e( 'Agent', 'p2flux-agent-paywall' ); ?></th><th><?php esc_html_e( 'Transaction', 'p2flux-agent-paywall' ); ?></th></tr></thead>
 				<tbody>
 				<?php foreach ( $recent as $row ) : ?>
 					<tr>
 						<td><?php echo esc_html( $row->created_at ); ?></td>
 						<td><a href="<?php echo esc_url( $row->url ); ?>"><?php echo esc_html( wp_parse_url( $row->url, PHP_URL_PATH ) ?? $row->url ); ?></a></td>
 						<td><?php echo esc_html( P2Flux_AP_Rules::format_units( (int) $row->amount ) ); ?> USDC</td>
-						<td class="code"><?php echo esc_html( substr( $row->payer, 0, 6 ) . '…' . substr( $row->payer, -4 ) ); ?></td>
+						<td class="code"><?php echo esc_html( ( '' !== ( $row->agent ?? '' ) ? $row->agent . ' · ' : '' ) . substr( $row->payer, 0, 6 ) . '…' . substr( $row->payer, -4 ) ); ?></td>
 						<?php if ( 'batch-settlement' === ( $row->scheme ?? 'exact' ) ) : ?>
 						<td><?php esc_html_e( 'prepaid', 'p2flux-agent-paywall' ); ?></td>
 						<?php else : ?>

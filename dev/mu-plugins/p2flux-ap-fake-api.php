@@ -17,6 +17,13 @@ add_filter(
 	'pre_http_request',
 	static function ( $pre, $args, $url ) {
 		$fake = get_option( 'p2flux_ap_fake' );
+		if ( is_array( $fake ) && ! empty( $fake['cached'] ) && 0 === strpos( $url, home_url() ) ) {
+			return array( 'headers' => array(), 'body' => '<html>the full page, from a cache</html>', 'response' => array( 'code' => 200, 'message' => '' ), 'cookies' => array() );
+		}
+		// The keys of a signing agent (Web Bot Auth), as https://agent.test would publish them.
+		if ( is_array( $fake ) && 'https://agent.test/.well-known/http-message-signatures-directory' === $url ) {
+			return array( 'headers' => array(), 'body' => (string) get_option( 'p2flux_ap_fake_jwks', '{}' ), 'response' => array( 'code' => 200, 'message' => '' ), 'cookies' => array() );
+		}
 		if ( ! is_array( $fake ) || 0 !== strpos( $url, 'https://api-test.p2flux.com/x402/' ) ) {
 			return $pre;
 		}
@@ -80,6 +87,9 @@ add_filter(
 		if ( 0 === strpos( $id, 'batchbad-' ) ) {
 			$state = base64_encode( wp_json_encode( array( 'x402Version' => 2, 'error' => 'batch_settlement_stale_cumulative_amount', 'accepts' => array( array( 'scheme' => 'batch-settlement', 'extra' => array( 'channelState' => array( 'chargedCumulativeAmount' => '150000' ) ) ) ) ) ) ); // phpcs:ignore
 			return $reply( 200, array( 'paid' => false, 'reason' => 'batch_settlement_stale_cumulative_amount', 'network' => 'eip155:84532', 'scheme' => 'batch-settlement', 'payment_required' => $state ) );
+		}
+		if ( 0 === strpos( $id, 'refund-' ) ) {
+			return $reply( 200, array( 'paid' => false, 'refunded' => true, 'reason' => 'refunded', 'network' => 'eip155:84532', 'scheme' => 'batch-settlement', 'payment_response' => base64_encode( '{"success":true,"amount":"900000"}' ) ) ); // phpcs:ignore
 		}
 		if ( 0 === strpos( $id, 'bad-' ) ) {
 			return $refuse( 'invalid_exact_evm_insufficient_balance' );

@@ -48,6 +48,8 @@ class P2Flux_AP_Gate {
 		foreach ( array( 'the_content', 'the_content_feed', 'the_excerpt', 'the_excerpt_rss', 'the_excerpt_embed', 'get_the_excerpt' ) as $hook ) {
 			add_filter( $hook, array( __CLASS__, 'hide_paid' ), 999 );
 		}
+		// WP Rocket: never serve its cached pages to agents. Other caches: Settings → "Check my setup".
+		add_filter( 'rocket_cache_reject_ua', static fn( $agents ) => array_merge( (array) $agents, explode( '|', P2Flux_AP_Detector::pattern() ) ) );
 	}
 
 	/**
@@ -65,7 +67,7 @@ class P2Flux_AP_Gate {
 			$signatures  = (array) apply_filters( 'p2flux_ap_agent_signatures', P2Flux_AP_Detector::SIGNATURES );
 			$user_agent  = isset( $_SERVER['HTTP_USER_AGENT'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) ) : '';
 			$has_payment = null !== self::payment_header();
-			self::$agent = ! is_user_logged_in() && P2Flux_AP_Detector::is_agent( $user_agent, $has_payment, $signatures );
+			self::$agent = ! is_user_logged_in() && P2Flux_AP_Detector::is_agent( $user_agent, $has_payment, $signatures, P2Flux_AP_Botauth::claimed() );
 		}
 		return self::$agent;
 	}
@@ -133,11 +135,22 @@ class P2Flux_AP_Gate {
 			self::$paid_post = $post->ID;
 			return;
 		}
+		self::send( $decision );
+	}
+
+	/**
+	 * Answer a request that was not paid: the 402 (or 503, or a refund's receipt), and nothing else.
+	 *
+	 * @param array $decision From charge().
+	 * @return never
+	 */
+	public static function send( array $decision ) {
 		status_header( $decision['status'] );
 		foreach ( $decision['headers'] as $name => $value ) {
 			header( $name . ': ' . $value );
 		}
 		header( 'Content-Type: application/json; charset=utf-8' );
+		header( 'Cache-Control: no-store, private' );
 		echo wp_json_encode( $decision['body'] );
 		exit;
 	}
@@ -217,7 +230,7 @@ class P2Flux_AP_Gate {
 	 * @param string $mime_type What the resource is.
 	 * @return array{ok: bool, status?: int, headers?: array, body?: array}
 	 */
-	private static function charge( $price, $url, $post_id, $mime_type ) {
+	public static function charge( $price, $url, $post_id, $mime_type ) {
 		$settings = P2Flux_AP_Settings::get();
 		$header   = self::payment_header();
 		if ( null === $header ) {
@@ -242,11 +255,20 @@ class P2Flux_AP_Gate {
 			$scheme = isset( $answer['scheme'] ) ? (string) $answer['scheme'] : 'exact';
 			// A prepaid request has no transaction of its own: its receipt identifies it.
 			$id = 'batch-settlement' === $scheme ? (string) ( $answer['receipt'] ?? '' ) : (string) ( $answer['transaction'] ?? '' );
-			P2Flux_AP_Log::insert( $post_id, $url, P2Flux_AP_Rules::units( $price ), (string) ( $answer['payer'] ?? '' ), $id, (string) ( $answer['network'] ?? '' ), $scheme );
+			P2Flux_AP_Log::insert( $post_id, $url, P2Flux_AP_Rules::units( $price ), (string) ( $answer['payer'] ?? '' ), $id, (string) ( $answer['network'] ?? '' ), $scheme, P2Flux_AP_Botauth::verified_agent() );
 			if ( ! empty( $answer['payment_response'] ) ) {
 				header( 'PAYMENT-RESPONSE: ' . $answer['payment_response'] );
 			}
 			return array( 'ok' => true );
+		}
+		// The agent took its unused prepaid balance back: the receipt, no content.
+		if ( ! empty( $answer['refunded'] ) && ! empty( $answer['payment_response'] ) && is_string( $answer['payment_response'] ) ) {
+			return array(
+				'ok'      => false,
+				'status'  => 200,
+				'headers' => array( 'PAYMENT-RESPONSE' => $answer['payment_response'] ),
+				'body'    => array( 'refunded' => true ),
+			);
 		}
 		$reason = isset( $answer['reason'] ) ? (string) $answer['reason'] : 'payment_refused';
 		if ( 'invalid_transaction_state' === $reason ) {
