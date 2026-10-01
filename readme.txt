@@ -4,7 +4,7 @@ Tags: ai, paywall, x402, usdc, crypto
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 0.4.0
+Stable tag: 0.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,7 +65,19 @@ Any wallet that can receive USDC on the Base network - for example Coinbase Wall
 
 = Can someone pay once and read many pages? =
 
-No. Each payment opens one page once. The same payment sent again - by the same agent or by anyone it was passed to - is refused, as the x402 standard requires.
+Not with this plugin alone. Each payment opens one page once. The same payment sent again - by the same agent or by anyone it was passed to - is refused, as the x402 standard requires.
+
+A membership plugin can sell access for a period instead (for example a subscription): it uses the hooks below to price the page, answers the payment with an access token, and lets later requests that carry the token through. Tipster Script does this for its predictions.
+
+= For plugin developers: hooks =
+
+* `p2flux_ap_price` (filter) - `( string|null $price, WP_Post $post, string $url )`: what a request costs an agent. Return a price such as "0.05", or null for free or already entitled.
+* `p2flux_ap_requirement` (filter) - `( array $required, string $price, string $url )`: the HTTP 402 before it is sent. Only `resource` (for example `description`, what the payment buys) can be changed; what is settled cannot.
+* `p2flux_ap_paid` (action) - `( array $payment )`: a payment settled, before the content is served. Keys: `price`, `units`, `url`, `post_id`, `payer`, `tx`, `network`, `scheme`, `agent`.
+* `P2Flux_AP_Gate::access_tokens()` - the tokens the agent sent in the `P2Flux-Access-Token` request header (base64url, 43 characters, up to 10, comma separated).
+* `p2flux_ap_agent_signatures` (filter) - the user-agent substrings treated as AI agents.
+
+Single pages answered to agents are never cached, so a page opened by a token is not served to others.
 
 = What happens if P2Flux is down? =
 
@@ -113,6 +125,10 @@ Nothing about your visitors is sent. P2Flux terms: https://p2flux.com/terms.html
 5. What an AI agent gets: 402 Payment Required with the price.
 
 == Changelog ==
+
+= 0.5.0 =
+* Hooks for membership plugins: price any page for agents, say what a payment buys, act on a settled payment, read the agent's access tokens.
+* Single pages answered to agents are never cached.
 
 = 0.4.0 =
 * Paid files: a price for AI agents on any file in the Media Library.

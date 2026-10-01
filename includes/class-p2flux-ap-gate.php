@@ -66,7 +66,7 @@ class P2Flux_AP_Gate {
 			 */
 			$signatures  = (array) apply_filters( 'p2flux_ap_agent_signatures', P2Flux_AP_Detector::SIGNATURES );
 			$user_agent  = isset( $_SERVER['HTTP_USER_AGENT'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) ) : '';
-			$has_payment = null !== self::payment_header();
+			$has_payment = null !== self::payment_header() || array() !== self::access_tokens();
 			self::$agent = ! is_user_logged_in() && P2Flux_AP_Detector::is_agent( $user_agent, $has_payment, $signatures, P2Flux_AP_Botauth::claimed() );
 		}
 		return self::$agent;
@@ -91,22 +91,46 @@ class P2Flux_AP_Gate {
 	}
 
 	/**
+	 * Access tokens the agent sent (P2Flux-Access-Token), for a membership plugin to check.
+	 *
+	 * @return string[]
+	 */
+	public static function access_tokens() {
+		$header = isset( $_SERVER['HTTP_P2FLUX_ACCESS_TOKEN'] ) ? wp_unslash( $_SERVER['HTTP_P2FLUX_ACCESS_TOKEN'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- validated character by character in access_tokens().
+		return P2Flux_AP_Rules::access_tokens( $header );
+	}
+
+	/**
 	 * The price of a post for agents, or null.
 	 *
 	 * @param WP_Post $post Post.
+	 * @param string  $url  The URL requested; the post's permalink when empty.
 	 * @return string|null
 	 */
-	public static function price_of( $post ) {
+	public static function price_of( $post, $url = '' ) {
 		if ( ! $post instanceof WP_Post || 'publish' !== $post->post_status || post_password_required( $post ) ) {
 			return null;
 		}
 		$categories = 'post' === $post->post_type ? wp_get_post_categories( $post->ID ) : array();
-		return P2Flux_AP_Rules::price_for_post(
+		$price      = P2Flux_AP_Rules::price_for_post(
 			P2Flux_AP_Settings::get(),
 			(string) get_post_meta( $post->ID, P2Flux_AP_Metabox::META, true ),
 			$post->post_type,
 			is_array( $categories ) ? $categories : array()
 		);
+		/**
+		 * Filter what a request costs an agent.
+		 *
+		 * For membership plugins: price content WordPress does not know as a post (a page that shows
+		 * a record selected by a query variable), or return null for content the agent is already
+		 * entitled to (see P2Flux_AP_Gate::access_tokens()). Return a price string such as "0.05".
+		 *
+		 * @param string|null $price Price in USDC, or null for free.
+		 * @param WP_Post     $post  The post.
+		 * @param string      $url   The URL requested.
+		 */
+		$price = apply_filters( 'p2flux_ap_price', $price, $post, '' !== $url ? $url : (string) get_permalink( $post ) );
+		return null === $price ? null : P2Flux_AP_Rules::normalise_price( $price );
 	}
 
 	/**
@@ -118,24 +142,43 @@ class P2Flux_AP_Gate {
 		if ( ! is_singular() || ! self::is_agent() ) {
 			return;
 		}
-		$post  = get_queried_object();
-		$price = self::price_of( $post );
-		if ( null === $price ) {
-			return;
-		}
+		// Whatever an agent is answered on a single page may depend on what it paid or holds: never cached.
 		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
 			// The constant page-cache plugins (WP Super Cache, W3 Total Cache, LiteSpeed…) read: not ours to prefix.
 			define( 'DONOTCACHEPAGE', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound
 		}
 		nocache_headers();
-		header( 'Vary: User-Agent, PAYMENT-SIGNATURE', false );
+		header( 'Vary: User-Agent, PAYMENT-SIGNATURE, P2Flux-Access-Token', false );
 
-		$decision = self::charge( $price, get_permalink( $post ), $post->ID, 'text/html' );
+		$post  = get_queried_object();
+		$url   = self::requested_url( $post );
+		$price = self::price_of( $post, $url );
+		if ( null === $price ) {
+			return;
+		}
+
+		$decision = self::charge( $price, $url, $post->ID, 'text/html' );
 		if ( true === $decision['ok'] ) {
 			self::$paid_post = $post->ID;
 			return;
 		}
 		self::send( $decision );
+	}
+
+	/**
+	 * The URL of the requested single page: its permalink, or the address actually asked for when a
+	 * rewrite rule shows something else at it (a record selected by a query variable).
+	 *
+	 * @param WP_Post $post Post.
+	 * @return string
+	 */
+	private static function requested_url( $post ) {
+		$permalink = (string) get_permalink( $post );
+		$path      = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_parse_url( esc_url_raw( wp_unslash( $_SERVER['REQUEST_URI'] ) ), PHP_URL_PATH ) : '';
+		if ( '' === $path || untrailingslashit( (string) wp_parse_url( $permalink, PHP_URL_PATH ) ) === untrailingslashit( $path ) ) {
+			return $permalink;
+		}
+		return home_url( $path );
 	}
 
 	/**
@@ -266,11 +309,44 @@ class P2Flux_AP_Gate {
 			set_transient( $key, 1, self::USED_TTL );
 			$scheme = isset( $answer['scheme'] ) ? (string) $answer['scheme'] : 'exact';
 			// A prepaid request has no transaction of its own: its receipt identifies it.
-			$id = 'batch-settlement' === $scheme ? (string) ( $answer['receipt'] ?? '' ) : (string) ( $answer['transaction'] ?? '' );
-			P2Flux_AP_Log::insert( $post_id, $url, P2Flux_AP_Rules::units( $price ), (string) ( $answer['payer'] ?? '' ), $id, (string) ( $answer['network'] ?? '' ), $scheme, P2Flux_AP_Botauth::verified_agent() );
+			$id    = 'batch-settlement' === $scheme ? (string) ( $answer['receipt'] ?? '' ) : (string) ( $answer['transaction'] ?? '' );
+			$agent = P2Flux_AP_Botauth::verified_agent();
+			P2Flux_AP_Log::insert( $post_id, $url, P2Flux_AP_Rules::units( $price ), (string) ( $answer['payer'] ?? '' ), $id, (string) ( $answer['network'] ?? '' ), $scheme, $agent );
 			if ( ! empty( $answer['payment_response'] ) ) {
 				header( 'PAYMENT-RESPONSE: ' . $answer['payment_response'] );
 			}
+			/**
+			 * A payment settled and the response is about to be served.
+			 *
+			 * For membership plugins: grant what this payment bought (and send the agent an access
+			 * token in a response header) before the content is rendered.
+			 *
+			 * @param array $payment {
+			 *     @type string $price   Price paid, e.g. "0.05".
+			 *     @type int    $units   The same in USDC base units.
+			 *     @type string $url     The resource.
+			 *     @type int    $post_id The post, 0 for a route.
+			 *     @type string $payer   The paying wallet address.
+			 *     @type string $tx      Transaction hash, or the prepaid receipt.
+			 *     @type string $network CAIP-2 network, e.g. "eip155:8453".
+			 *     @type string $scheme  "exact" or "batch-settlement".
+			 *     @type string $agent   The agent's verified Web Bot Auth host, or "".
+			 * }
+			 */
+			do_action(
+				'p2flux_ap_paid',
+				array(
+					'price'   => $price,
+					'units'   => P2Flux_AP_Rules::units( $price ),
+					'url'     => $url,
+					'post_id' => (int) $post_id,
+					'payer'   => (string) ( $answer['payer'] ?? '' ),
+					'tx'      => $id,
+					'network' => (string) ( $answer['network'] ?? '' ),
+					'scheme'  => $scheme,
+					'agent'   => (string) $agent,
+				)
+			);
 			return array( 'ok' => true );
 		}
 		// The agent took its unused prepaid balance back: the receipt, no content.
@@ -347,6 +423,20 @@ class P2Flux_AP_Gate {
 			),
 			'accepts'     => $accepts,
 		);
+		/**
+		 * Filter the payment requirement (HTTP 402) before it is sent.
+		 *
+		 * For membership plugins: say in resource.description what the payment buys. Do not change
+		 * "accepts": it is what P2Flux settles.
+		 *
+		 * @param array  $required The x402 PaymentRequired object.
+		 * @param string $price    Price.
+		 * @param string $url      Resource.
+		 */
+		$filtered = apply_filters( 'p2flux_ap_requirement', $required, $price, $url );
+		if ( is_array( $filtered ) && isset( $filtered['resource'] ) && is_array( $filtered['resource'] ) ) {
+			$required['resource'] = array_map( 'strval', array_intersect_key( $filtered['resource'], $required['resource'] ) ) + $required['resource'];
+		}
 		if ( null !== $error ) {
 			$required = array(
 				'x402Version' => 2,

@@ -228,5 +228,26 @@ check( 'agent host: a plain string', 'chatgpt.com' === P2Flux_AP_Botauth::agent_
 check( 'agent host: a named entry', 'agent.bot.goog' === P2Flux_AP_Botauth::agent_host( 'sig1="https://Agent.Bot.goog/"' ) );
 check( 'agent host: http, a path, an address with a user name - none', '' === P2Flux_AP_Botauth::agent_host( '"http://a.test"' ) . P2Flux_AP_Botauth::agent_host( '"https://a.test/x"' ) . P2Flux_AP_Botauth::agent_host( '"https://u@a.test"' ) . P2Flux_AP_Botauth::agent_host( null ) );
 
+echo "access tokens\n";
+$t1 = str_repeat( 'A', 21 ) . '-' . str_repeat( 'b', 20 ) . '_';
+$t2 = str_repeat( 'z', 43 );
+check( 'one token', array( $t1 ) === P2Flux_AP_Rules::access_tokens( $t1 ) );
+check( 'a list with spaces, duplicates once', array( $t1, $t2 ) === P2Flux_AP_Rules::access_tokens( " {$t1} ,{$t2}, {$t1}" ) );
+check( 'at most ten', 10 === count( P2Flux_AP_Rules::access_tokens( implode( ',', array_map( static fn( $i ) => str_pad( (string) $i, 43, 'x' ), range( 1, 12 ) ) ) ) ) );
+foreach (
+	array(
+		'too short'           => substr( $t1, 1 ),
+		'too long'            => $t1 . 'a',
+		'base64 not base64url' => str_replace( '-', '+', $t1 ),
+		'padding'             => substr( $t1, 1 ) . '=',
+		'not a string'        => null,
+		'empty'               => '',
+		'a huge header'       => str_repeat( $t1 . ',', 30 ),
+	) as $what => $header
+) {
+	check( 'no token: ' . $what, array() === P2Flux_AP_Rules::access_tokens( $header ) );
+}
+check( 'the good one survives junk around it', array( $t2 ) === P2Flux_AP_Rules::access_tokens( "junk, {$t2}, <script>" ) );
+
 echo "\n{$checks} checks, {$failures} failed\n";
 exit( $failures ? 1 : 0 );

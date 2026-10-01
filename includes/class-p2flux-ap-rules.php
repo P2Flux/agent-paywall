@@ -129,6 +129,30 @@ class P2Flux_AP_Rules {
 	}
 
 	/**
+	 * Access tokens an agent sent in the P2Flux-Access-Token header, for a membership plugin to check.
+	 *
+	 * A token is 32 random bytes in base64url (43 characters). The header may carry several, comma
+	 * separated: an agent does not know before asking which membership a page belongs to. Anything
+	 * else is dropped; at most 10 are kept.
+	 *
+	 * @param mixed $header Raw header value.
+	 * @return string[]
+	 */
+	public static function access_tokens( $header ) {
+		if ( ! is_string( $header ) || strlen( $header ) > 1024 ) {
+			return array();
+		}
+		$tokens = array();
+		foreach ( explode( ',', $header ) as $token ) {
+			$token = trim( $token );
+			if ( 1 === preg_match( '/^[A-Za-z0-9_-]{43}$/', $token ) && ! in_array( $token, $tokens, true ) ) {
+				$tokens[] = $token;
+			}
+		}
+		return array_slice( $tokens, 0, 10 );
+	}
+
+	/**
 	 * Whether a REST prefix may be made paid.
 	 *
 	 * @param string $prefix e.g. "/myapi/v1/".

@@ -458,6 +458,57 @@ await check('files: clearing the wallet removes the uploads rule; setting it aga
   wp('eval', `wp_set_current_user(1); P2Flux_AP_Files::save( array( 'ID' => ${paidFile.id} ), array( 'p2flux_ap_price' => '' ) );`)
 })
 
+// --- hooks for membership plugins (dev/mu-plugins/p2flux-ap-membership-fixture.php) ------------------
+const member = mk('page', 'Member page', 'MEMBER-SECRET')
+wp('post', 'meta', 'update', member.id, '_ap_fixture_member', '1')
+try { wp('option', 'delete', 'p2flux_ap_fixture_tokens') } catch {}
+let memberToken = ''
+await check('membership: the price filter prices a page the rules leave free, and the 402 says what it buys', async () => {
+  const r = await get(rel(member.url))
+  assert.equal(r.status, 402)
+  const req = decode(r.headers.get('payment-required'))
+  assert.equal(req.accepts[0].amount, '300000')
+  assert.match(req.resource.description, /MEMBERSHIP-OFFER/)
+  assert.ok(req.accepts.length > 0, 'a plugin cannot empty "accepts"')
+  assert.match(r.headers.get('vary') ?? '', /P2Flux-Access-Token/)
+})
+await check('membership: the payment fires p2flux_ap_paid with the payer, and the plugin answers with a token', async () => {
+  const r = await get(rel(member.url), { payment: pay('member-1') })
+  assert.equal(r.status, 200)
+  assert.match(r.text, /MEMBER-SECRET/)
+  memberToken = r.headers.get('p2flux-access-token') ?? ''
+  assert.match(memberToken, /^[A-Za-z0-9_-]{43}$/)
+  const p = JSON.parse(wp('option', 'get', 'p2flux_ap_fixture_last_payment', '--format=json'))
+  assert.equal(p.price, '0.3')
+  assert.equal(p.units, 300000)
+  assert.equal(p.post_id, Number(member.id))
+  assert.match(p.payer, /^0x[0-9a-fA-F]{40}$/)
+  assert.match(p.tx, /^0x[0-9a-f]{64}$/)
+})
+await check('membership: with the token the page is served, nothing is asked of P2Flux and nothing is cached', async () => {
+  const asked = calls()
+  const r = await get(rel(member.url), { extra: { 'p2flux-access-token': `junk, ${memberToken}` } })
+  assert.equal(r.status, 200)
+  assert.match(r.text, /MEMBER-SECRET/)
+  assert.equal(calls(), asked, 'no call to P2Flux')
+  assert.match(r.headers.get('cache-control') ?? '', /no-store|no-cache/)
+})
+await check('membership: a token does not open posts it was not issued for', async () => {
+  const r = await get(rel(paid.url), { extra: { 'p2flux-access-token': memberToken } })
+  assert.equal(r.status, 402)
+})
+await check('membership: an expired or unknown token is asked to pay again', async () => {
+  assert.equal((await get(rel(member.url), { extra: { 'p2flux-access-token': 'x'.repeat(43) } })).status, 402)
+  wp('eval', `$t = get_option( 'p2flux_ap_fixture_tokens' ); foreach ( $t as $k => $v ) { $t[ $k ] = time() - 1; } update_option( 'p2flux_ap_fixture_tokens', $t );`)
+  assert.equal((await get(rel(member.url), { extra: { 'p2flux-access-token': memberToken } })).status, 402)
+})
+await check('membership: a person never sees any of it', async () => {
+  const r = await get(rel(member.url), { ua: CHROME })
+  assert.equal(r.status, 200)
+  assert.match(r.text, /MEMBER-SECRET/)
+})
+wp('post', 'delete', member.id, '--force')
+
 await check('uninstall removes settings, prices, log and cache; payments stay on chain', async () => {
   wp('eval', `define( 'WP_UNINSTALL_PLUGIN', true ); include WP_PLUGIN_DIR . '/p2flux-agent-paywall/uninstall.php';`)
   assert.equal(wp('db', 'query', "SHOW TABLES LIKE 'wp_p2flux_ap_payments'", '--skip-column-names'), '')
