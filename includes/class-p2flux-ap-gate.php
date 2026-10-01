@@ -139,16 +139,20 @@ class P2Flux_AP_Gate {
 	 * @return void
 	 */
 	public static function on_page() {
-		if ( ! is_singular() || ! self::is_agent() ) {
+		if ( ! self::is_agent() ) {
 			return;
 		}
-		// Whatever an agent is answered on a single page may depend on what it paid or holds: never cached.
+		// What an agent is answered - a list too - may depend on what it paid or holds: never cached,
+		// so it is never served to people or to other agents.
 		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
 			// The constant page-cache plugins (WP Super Cache, W3 Total Cache, LiteSpeed…) read: not ours to prefix.
 			define( 'DONOTCACHEPAGE', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound
 		}
 		nocache_headers();
 		header( 'Vary: User-Agent, PAYMENT-SIGNATURE, P2Flux-Access-Token', false );
+		if ( ! is_singular() ) {
+			return;
+		}
 
 		$post  = get_queried_object();
 		$url   = self::requested_url( $post );
@@ -174,11 +178,16 @@ class P2Flux_AP_Gate {
 	 */
 	private static function requested_url( $post ) {
 		$permalink = (string) get_permalink( $post );
-		$path      = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_parse_url( esc_url_raw( wp_unslash( $_SERVER['REQUEST_URI'] ) ), PHP_URL_PATH ) : '';
-		if ( '' === $path || untrailingslashit( (string) wp_parse_url( $permalink, PHP_URL_PATH ) ) === untrailingslashit( $path ) ) {
+		$uri       = isset( $_SERVER['REQUEST_URI'] ) ? esc_url_raw( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
+		$path      = (string) wp_parse_url( $uri, PHP_URL_PATH );
+		$query     = (string) wp_parse_url( $uri, PHP_URL_QUERY );
+		if ( '' === $path || ( '' === $query && untrailingslashit( (string) wp_parse_url( $permalink, PHP_URL_PATH ) ) === untrailingslashit( $path ) ) ) {
 			return $permalink;
 		}
-		return home_url( $path );
+		// The address as asked (a query variable can select what is shown), on this site's own origin.
+		$home   = wp_parse_url( home_url() );
+		$origin = ( $home['scheme'] ?? 'https' ) . '://' . ( $home['host'] ?? '' ) . ( isset( $home['port'] ) ? ':' . $home['port'] : '' );
+		return $origin . $path . ( '' === $query ? '' : '?' . $query );
 	}
 
 	/**

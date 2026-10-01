@@ -502,6 +502,12 @@ await check('membership: an expired or unknown token is asked to pay again', asy
   wp('eval', `$t = get_option( 'p2flux_ap_fixture_tokens' ); foreach ( $t as $k => $v ) { $t[ $k ] = time() - 1; } update_option( 'p2flux_ap_fixture_tokens', $t );`)
   assert.equal((await get(rel(member.url), { extra: { 'p2flux-access-token': memberToken } })).status, 402)
 })
+await check('an agent is never answered from a page cache, lists included; people keep their caching', async () => {
+  const agent = await get('/')
+  assert.match(agent.headers.get('cache-control') ?? '', /no-store|no-cache/)
+  const person = await get('/', { ua: CHROME })
+  assert.doesNotMatch(person.headers.get('cache-control') ?? '', /no-store/)
+})
 await check('membership: a person never sees any of it', async () => {
   const r = await get(rel(member.url), { ua: CHROME })
   assert.equal(r.status, 200)
