@@ -65,7 +65,7 @@ Any wallet that can receive USDC on the Base network - for example Coinbase Wall
 
 = Can someone pay once and read many pages? =
 
-Not with this plugin alone. Each payment opens one page once. The same payment sent again - by the same agent or by anyone it was passed to - is refused, as the x402 standard requires.
+An agent can pay once into a prepaid balance and then read many pages from it, each with a signature instead of a transaction. Each page is still paid at its price, from that balance. Each payment opens one page once: the same payment sent again - by the same agent or by anyone it was passed to - is refused, as the x402 standard requires. Prepaid can be switched off in the settings; then every page is paid on its own.
 
 A membership plugin can sell access for a period instead (for example a subscription): it uses the hooks below to price the page, answers the payment with an access token, and lets later requests that carry the token through. Tipster Script does this for its predictions.
 
