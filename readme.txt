@@ -4,7 +4,7 @@ Tags: ai, paywall, x402, usdc, crypto
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 0.5.0
+Stable tag: 0.5.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -125,6 +125,9 @@ Nothing about your visitors is sent. P2Flux terms: https://p2flux.com/terms.html
 5. What an AI agent gets: 402 Payment Required with the price.
 
 == Changelog ==
+
+= 0.5.1 =
+* Plugin URI points to the plugin's documentation page.
 
 = 0.5.0 =
 * Hooks for membership plugins: price any page for agents, say what a payment buys, act on a settled payment, read the agent's access tokens.
