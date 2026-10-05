@@ -15,8 +15,11 @@ defined( 'ABSPATH' ) || exit;
  */
 class P2Flux_AP_Rules {
 
-	/** Smallest price the P2Flux API settles. */
-	const MIN_PRICE = '0.01';
+	/**
+	 * Smallest price the P2Flux API accepts: 0.0001 USDC, paid from an agent's prepaid balance. Paid per
+	 * request on chain, a price under 0.01 costs the agent 0.01 (the API offers both).
+	 */
+	const MIN_PRICE = '0.0001';
 	/** Largest price this plugin accepts for one request. */
 	const MAX_PRICE = '1000';
 

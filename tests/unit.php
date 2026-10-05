@@ -47,7 +47,9 @@ foreach (
 		array( '1000', '1000' ),
 		array( '007.10', '7.1' ),
 		array( 3, '3' ),
-		array( '0.009', null ),
+		array( '0.009', '0.009' ),
+		array( '0.0001', '0.0001' ),
+		array( '0.00009', null ),
 		array( '0', null ),
 		array( '0.00', null ),
 		array( '1000.000001', null ),
@@ -96,7 +98,8 @@ check( 'paid category: default', '0.05' === P2Flux_AP_Rules::price_for_post( $ca
 check( 'other category: free', null === P2Flux_AP_Rules::price_for_post( $cat, '', 'post', array( 3 ) ) );
 check( 'category ids as strings still match', '0.05' === P2Flux_AP_Rules::price_for_post( array( 'paid_categories' => array( '7' ) ) + $cat, '', 'post', array( '7' ) ) );
 check( 'broken own price falls back to the rules', '0.05' === P2Flux_AP_Rules::price_for_post( $s, 'abc', 'post', array() ) );
-check( 'own price below 0.01 falls back to the rules (free here)', null === P2Flux_AP_Rules::price_for_post( $none, '0.001', 'post', array() ) );
+check( 'own price below 0.0001 falls back to the rules (free here)', null === P2Flux_AP_Rules::price_for_post( $none, '0.00001', 'post', array() ) );
+check( 'a sub-cent own price is kept', '0.001' === P2Flux_AP_Rules::price_for_post( $none, '0.001', 'post', array() ) );
 check( 'no valid default: nothing is paid by type', null === P2Flux_AP_Rules::price_for_post( array( 'default_price' => 'x' ) + $s, '', 'post', array() ) );
 check( 'no valid default: own price still applies', '0.3' === P2Flux_AP_Rules::price_for_post( array( 'default_price' => 'x' ) + $s, '0.3', 'post', array() ) );
 check( 'missing settings keys: free, no warning', null === P2Flux_AP_Rules::price_for_post( array(), '', 'post', array() ) );

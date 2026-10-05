@@ -90,7 +90,7 @@ class P2Flux_AP_Abilities {
 			'p2flux-agent-paywall/set-post-price',
 			array(
 				'label'               => __( 'Set the price of a post for AI agents', 'p2flux-agent-paywall' ),
-				'description'         => __( 'Set what AI agents pay to read one post, page or file. price: an amount in USDC such as "0.10" (at least 0.01), "0" to make it free for agents, or "" to follow the site settings.', 'p2flux-agent-paywall' ),
+				'description'         => __( 'Set what AI agents pay to read one post, page or file. price: an amount in USDC such as "0.10" (at least 0.0001; under 0.01 only agents paying from a prepaid balance pay that little, others pay 0.01), "0" to make it free for agents, or "" to follow the site settings.', 'p2flux-agent-paywall' ),
 				'category'            => self::CATEGORY,
 				'input_schema'        => array(
 					'type'                 => 'object',
