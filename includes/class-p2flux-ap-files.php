@@ -198,7 +198,7 @@ class P2Flux_AP_Files {
 	 * @return array
 	 */
 	public static function field( $fields, $post ) {
-		$help = __( 'Empty: free. An amount (at least 0.0001; under 0.01 only from a prepaid balance, else 0.01): AI agents pay that to download this file. People see it as always.', 'p2flux-agent-paywall' );
+		$help = __( 'Empty: free. An amount (at least 0.001; under 0.01 only from a prepaid balance, else 0.01): AI agents pay that to download this file. People see it as always.', 'p2flux-agent-paywall' );
 		if ( ! empty( $GLOBALS['is_nginx'] ) ) {
 			$help .= ' ' . __( 'Your server is nginx: it needs one rule from the P2Flux guide to protect the direct address of files.', 'p2flux-agent-paywall' );
 		}

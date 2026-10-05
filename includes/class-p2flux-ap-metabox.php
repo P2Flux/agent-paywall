@@ -49,7 +49,7 @@ class P2Flux_AP_Metabox {
 		<p>
 			<input type="text" inputmode="decimal" class="small-text" id="p2flux-ap-post-price" name="p2flux_ap_price" value="<?php echo esc_attr( $value ); ?>" placeholder="<?php echo esc_attr( P2Flux_AP_Settings::get()['default_price'] ); ?>"> USDC
 		</p>
-		<p class="description"><?php esc_html_e( 'Empty: the site settings decide. 0: free for agents. Any other amount (at least 0.0001): agents pay that to read this. Under 0.01 it is that price from a prepaid balance, 0.01 paid one by one.', 'p2flux-agent-paywall' ); ?></p>
+		<p class="description"><?php esc_html_e( 'Empty: the site settings decide. 0: free for agents. Any other amount (at least 0.001): agents pay that to read this. Under 0.01 it is that price from a prepaid balance, 0.01 paid one by one.', 'p2flux-agent-paywall' ); ?></p>
 		<?php
 	}
 
