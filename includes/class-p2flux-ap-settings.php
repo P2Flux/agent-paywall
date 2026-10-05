@@ -324,7 +324,7 @@ class P2Flux_AP_Settings {
 						<th scope="row"><label for="p2flux-ap-price"><?php esc_html_e( 'Price per request', 'p2flux-agent-paywall' ); ?></label></th>
 						<td>
 							<input id="p2flux-ap-price" class="small-text" type="text" inputmode="decimal" name="<?php echo esc_attr( $name ); ?>[default_price]" value="<?php echo esc_attr( $s['default_price'] ); ?>"> USDC
-							<p class="description"><?php esc_html_e( 'What an agent pays to read one page or call one route. At least 0.0001; under 0.01 it is that price from a prepaid balance and 0.01 paid one by one. A single post can have its own price, set in the editor.', 'p2flux-agent-paywall' ); ?></p>
+							<p class="description"><?php esc_html_e( 'What an agent pays to read one page or call one route. At least 0.001; under 0.01 it is that price from a prepaid balance and 0.01 paid one by one. A single post can have its own price, set in the editor.', 'p2flux-agent-paywall' ); ?></p>
 						</td>
 					</tr>
 					<tr>
