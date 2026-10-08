@@ -297,9 +297,21 @@ class P2Flux_AP_Gate {
 		if ( false !== get_transient( $key ) ) {
 			return self::required( $settings, $price, $url, $mime_type, 'invalid_transaction_state' );
 		}
+		/* Every header costs a call to P2Flux, and P2Flux limits those per site. A flood of junk headers
+		 * from one address must not use the site's allowance up for everyone: it is answered 402 here. */
+		if ( self::redeems_exhausted() ) {
+			return self::required( $settings, $price, $url, $mime_type, 'rate_limited' );
+		}
 
 		$answer = P2Flux_AP_Client::redeem( $settings['wallet'], $price, $header, $url, $settings['environment'] );
 		if ( is_wp_error( $answer ) ) {
+			/* Only P2Flux being unreachable or failing is "unavailable" (and may be served free, if the
+			 * owner chose so). A refusal - a rate limit above all - is an answer: 402 again, never free,
+			 * and never a 503 for every honest agent because one address sent junk. */
+			if ( 'p2flux_ap_refused' === $answer->get_error_code() ) {
+				$status = (int) ( ( (array) $answer->get_error_data() )['status'] ?? 0 );
+				return self::required( $settings, $price, $url, $mime_type, 429 === $status ? 'rate_limited' : 'payment_refused' );
+			}
 			return self::unavailable( $settings );
 		}
 		// Headers from P2Flux go to the agent as they are: only if they are what they must be, base64.
@@ -466,6 +478,25 @@ class P2Flux_AP_Gate {
 	 * @param array $settings Settings.
 	 * @return array
 	 */
+	/** Redeem calls one client address may cause per minute; above it the header is answered 402 locally. */
+	const REDEEMS_PER_MINUTE = 60;
+
+	/**
+	 * Whether this client address has caused its allowance of redeem calls this minute (and count this one).
+	 *
+	 * @return bool
+	 */
+	private static function redeems_exhausted() {
+		$ip     = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
+		$bucket = 'p2flux_ap_rate_' . hash( 'sha256', $ip . '|' . gmdate( 'YmdHi' ) );
+		$n      = (int) get_transient( $bucket );
+		if ( $n >= self::REDEEMS_PER_MINUTE ) {
+			return true;
+		}
+		set_transient( $bucket, $n + 1, 2 * MINUTE_IN_SECONDS );
+		return false;
+	}
+
 	private static function unavailable( array $settings ) {
 		if ( 'free' === $settings['api_down'] ) {
 			return array( 'ok' => true );

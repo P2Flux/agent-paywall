@@ -108,6 +108,9 @@ echo "price of a route\n";
 check( 'listed prefix: default', '0.05' === P2Flux_AP_Rules::price_for_route( $s, '/shop/v1/items' ) );
 check( 'other route: free', null === P2Flux_AP_Rules::price_for_route( $s, '/other/v1/items' ) );
 check( 'prefix is a prefix, not a substring', null === P2Flux_AP_Rules::price_for_route( $s, '/x/shop/v1/' ) );
+// WordPress matches REST routes case-insensitively; a paid route must not be free in capitals.
+check( 'a listed prefix is matched whatever the case', '0.05' === P2Flux_AP_Rules::price_for_route( $s, '/SHOP/v1/items' ) );
+check( '...and a prefix saved in capitals still matches', '0.05' === P2Flux_AP_Rules::price_for_route( array( 'paid_routes' => array( '/Shop/V1/' ) ) + $s, '/shop/v1/items' ) );
 check( 'a listed /wp/ prefix is ignored', null === P2Flux_AP_Rules::price_for_route( array( 'paid_routes' => array( '/wp/v2/' ) ) + $s, '/wp/v2/posts' ) );
 foreach ( array( '/wp/v2/', '/wp', '/wp/', '/oembed/1.0/', '/wp-site-health/v1/', 'shop/v1', '/sh op/', '/../x', '/shop/./v1', '', '/' ) as $bad ) {
 	check( "route_allowed rejects '{$bad}'", ! P2Flux_AP_Rules::route_allowed( $bad ) );

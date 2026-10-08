@@ -143,7 +143,7 @@ class P2Flux_AP_Settings {
 
 		$routes = array();
 		foreach ( preg_split( '/\R/', (string) ( $input['paid_routes'] ?? '' ) ) as $line ) {
-			$line = trim( sanitize_text_field( $line ) );
+			$line = strtolower( trim( sanitize_text_field( $line ) ) );
 			if ( '' === $line ) {
 				continue;
 			}

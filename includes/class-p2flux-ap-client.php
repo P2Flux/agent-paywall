@@ -153,6 +153,10 @@ class P2Flux_AP_Client {
 		if ( 400 === $status ) {
 			return new WP_Error( 'p2flux_ap_rejected', is_array( $data ) && isset( $data['error'] ) ? (string) $data['error'] : 'rejected' );
 		}
+		// P2Flux answered and refused (a rate limit, a refused request): an answer, not an outage.
+		if ( $status > 400 && $status < 500 ) {
+			return new WP_Error( 'p2flux_ap_refused', 'HTTP ' . $status, array( 'status' => $status ) );
+		}
 		if ( 200 !== $status || ! is_array( $data ) ) {
 			return new WP_Error( 'p2flux_ap_unavailable', 'HTTP ' . $status );
 		}

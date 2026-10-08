@@ -4,7 +4,7 @@ Tags: ai, paywall, x402, usdc, crypto
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 0.6.0
+Stable tag: 0.6.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -125,6 +125,10 @@ Nothing about your visitors is sent. P2Flux terms: https://p2flux.com/terms.html
 5. What an AI agent gets: 402 Payment Required with the price.
 
 == Changelog ==
+
+= 0.6.1 =
+* Security: a paid REST route could be read free by changing the letter case of the URL (WordPress matches routes case-insensitively, the plugin did not). Fixed; saved routes are lowercased.
+* A rate limit or refusal from P2Flux is answered with 402 again, never with free content (even with "API down: free") and never with 503 for every agent. Junk payment headers are limited per client address before P2Flux is asked.
 
 = 0.6.0 =
 * Prices from 0.001 USDC. Under 0.01 an agent pays exactly that from a prepaid balance, or 0.01 when it pays request by request.

@@ -124,7 +124,8 @@ class P2Flux_AP_Rules {
 			return null;
 		}
 		foreach ( (array) ( $settings['paid_routes'] ?? array() ) as $prefix ) {
-			if ( self::route_allowed( $prefix ) && 0 === strpos( $route, $prefix ) ) {
+			// WordPress matches routes case-insensitively, so the prefix must too: /MYAPI/v1/ is /myapi/v1/.
+			if ( self::route_allowed( $prefix ) && 0 === strpos( strtolower( $route ), strtolower( $prefix ) ) ) {
 				return $default;
 			}
 		}
