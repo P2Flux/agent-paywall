@@ -48,8 +48,6 @@ class P2Flux_AP_Gate {
 		foreach ( array( 'the_content', 'the_content_feed', 'the_excerpt', 'the_excerpt_rss', 'the_excerpt_embed', 'get_the_excerpt' ) as $hook ) {
 			add_filter( $hook, array( __CLASS__, 'hide_paid' ), 999 );
 		}
-		// WP Rocket: never serve its cached pages to agents. Other caches: Settings → "Check my setup".
-		add_filter( 'rocket_cache_reject_ua', static fn( $agents ) => array_merge( (array) $agents, explode( '|', P2Flux_AP_Detector::pattern() ) ) );
 	}
 
 	/**
@@ -140,16 +138,16 @@ class P2Flux_AP_Gate {
 	 */
 	public static function on_page() {
 		if ( ! self::is_agent() ) {
+			// A person's copy of a paid page: a shared cache that honours Vary keeps it apart from agents.
+			// Page caches that ignore Vary are told by P2Flux_AP_Cache to let agents through.
+			if ( is_singular() && null !== self::price_of( get_queried_object() ) ) {
+				header( 'Vary: User-Agent, PAYMENT-SIGNATURE', false );
+			}
 			return;
 		}
 		// What an agent is answered - a list too - may depend on what it paid or holds: never cached,
 		// so it is never served to people or to other agents.
-		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
-			// The constant page-cache plugins (WP Super Cache, W3 Total Cache, LiteSpeed…) read: not ours to prefix.
-			define( 'DONOTCACHEPAGE', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound
-		}
-		nocache_headers();
-		header( 'Vary: User-Agent, PAYMENT-SIGNATURE, P2Flux-Access-Token', false );
+		P2Flux_AP_Cache::no_store();
 		if ( ! is_singular() ) {
 			return;
 		}
@@ -232,6 +230,7 @@ class P2Flux_AP_Gate {
 		if ( null === $price ) {
 			return $result;
 		}
+		P2Flux_AP_Cache::no_store();
 		$decision = self::charge( $price, rest_url( ltrim( $route, '/' ) ), $post ? $post->ID : 0, 'application/json' );
 		if ( true === $decision['ok'] ) {
 			if ( $post ) {

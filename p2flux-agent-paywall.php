@@ -3,7 +3,7 @@
  * Plugin Name:       P2Flux Agent Paywall
  * Plugin URI:        https://p2flux.com/docs/agent-paywall.html
  * Description:       Get paid in USDC when AI agents read your site. Humans see your site as always; AI agents pay per page with x402, straight to your wallet.
- * Version:           0.6.1
+ * Version:           0.6.2
  * Requires at least: 6.5
  * Requires PHP:      8.1
  * Author:            P2Flux
@@ -17,7 +17,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'P2FLUX_AP_VERSION', '0.6.1' );
+define( 'P2FLUX_AP_VERSION', '0.6.2' );
 define( 'P2FLUX_AP_FILE', __FILE__ );
 define( 'P2FLUX_AP_DIR', __DIR__ );
 
@@ -32,9 +32,23 @@ require_once __DIR__ . '/includes/class-p2flux-ap-metabox.php';
 require_once __DIR__ . '/includes/class-p2flux-ap-discovery.php';
 require_once __DIR__ . '/includes/class-p2flux-ap-files.php';
 require_once __DIR__ . '/includes/class-p2flux-ap-abilities.php';
+require_once __DIR__ . '/includes/class-p2flux-ap-cache.php';
 
-register_activation_hook( __FILE__, array( 'P2Flux_AP_Log', 'install' ) );
-register_deactivation_hook( __FILE__, static fn() => P2Flux_AP_Files::sync( true ) );
+P2Flux_AP_Cache::register();
+register_activation_hook(
+	__FILE__,
+	static function () {
+		P2Flux_AP_Log::install();
+		P2Flux_AP_Cache::sync( '' === P2Flux_AP_Settings::get()['wallet'] );
+	}
+);
+register_deactivation_hook(
+	__FILE__,
+	static function () {
+		P2Flux_AP_Files::sync( true );
+		P2Flux_AP_Cache::sync( true );
+	}
+);
 
 add_action( 'plugins_loaded', 'p2flux_ap_boot' );
 

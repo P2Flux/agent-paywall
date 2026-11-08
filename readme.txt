@@ -4,7 +4,7 @@ Tags: ai, paywall, x402, usdc, crypto
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 0.6.1
+Stable tag: 0.6.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -44,7 +44,7 @@ Fees are taken by smart contracts on the way to your wallet; P2Flux never holds 
 * In lists, feeds, search and the REST API, agents see the price instead of the text of paid posts.
 * Earnings on the settings page: today, this month, all time, and the last payments with a link to each transaction.
 * A listing in the P2Flux directory, so AI agents looking for content to buy can find your site.
-* "Check my setup": one button that opens your newest paid post as an AI agent would, and tells you if a page cache or CDN is giving it away.
+* "Test my paywall": one button that opens your newest paid post as an AI agent would, and tells you if a page cache, CDN or host is giving it away or blocking agents - and what to change.
 * Agents that sign their requests (Web Bot Auth, used by ChatGPT agent and others) are recognised whatever their user agent says, and named in your payment list.
 * For your own AI assistant (WordPress 6.9+, Abilities API): "what did agents pay me this month?", "make this post cost 0.10".
 * A test mode on Base Sepolia with test USDC, to see it work before real money moves.
@@ -85,7 +85,7 @@ You choose: agents are asked to come back later (default), or they read for free
 
 = I use a page cache or a CDN. =
 
-A cache that stores whole pages may serve a paid post to an agent before WordPress runs. The plugin marks every answer to an agent as not cacheable and tells WP Rocket to skip AI agents. Other page caches and CDNs that cache whole pages must be told to bypass requests from AI crawlers. Press "Check my setup" on the settings page: it tells you whether an agent is asked to pay. The steps for common caches and CDNs: https://p2flux.com/docs/agent-paywall.html#caches
+A cache that stores whole pages may serve a paid post to an agent before WordPress runs. The plugin marks every answer to an agent as not cacheable. On LiteSpeed it adds a rule at the top of your .htaccess (between "# BEGIN P2Flux Agent Paywall" and "# END P2Flux Agent Paywall", removed when you deactivate the plugin) so AI agents and payments skip the cache; if the file cannot be written, the settings page shows the lines to add. WP Rocket is told to skip AI agents. The cache is emptied when these rules change. Other page caches and CDNs (W3 Total Cache, WP Super Cache, Cloudflare, host caches) must be told to bypass requests from AI crawlers. Press "Test my paywall" on the settings page: it tells you whether an agent is asked to pay, which cache answered if not, and what to change. The steps for common caches and CDNs: https://p2flux.com/docs/agent-paywall.html#caches
 
 = Are images and files protected? =
 
@@ -125,6 +125,10 @@ Nothing about your visitors is sent. P2Flux terms: https://p2flux.com/terms.html
 5. What an AI agent gets: 402 Payment Required with the price.
 
 == Changelog ==
+
+= 0.6.2 =
+* Fixed: a full-page cache (LiteSpeed Cache and others) could serve a paid page to AI agents for free, from a copy stored when a person visited. On LiteSpeed the plugin now adds a marked rule to .htaccess so AI agents and requests with a payment skip the cache, tells WP Rocket the same, and empties the cache when the rules change. Answers to agents are marked not cacheable for LiteSpeed too.
+* "Check my setup" is now "Test my paywall": it asks for a paid page as an agent twice and once past the cache, and says which cache gives pages away, or whether your host blocks AI agents, and what to change.
 
 = 0.6.1 =
 * Security: a paid REST route could be read free by changing the letter case of the URL (WordPress matches routes case-insensitively, the plugin did not). Fixed; saved routes are lowercased.
