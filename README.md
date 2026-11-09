@@ -5,7 +5,8 @@ All x402 logic lives in the P2Flux API (`POST /x402/paywall/challenge`, `POST /x
 the plugin only decides what is paid and asks the API.
 
 ```
-includes/   rules (price), detector (agent), settings, client, gate (hooks), log, metabox, discovery
+includes/   rules (price), detector (agent), settings, client, gate (hooks), log, metabox, discovery,
+            cache (page caches: .htaccess rule for LiteSpeed, WP Rocket filter, purge, setup test)
 tests/      unit.php - offline, no WordPress
 dev/        local-wp.sh (local site on :8082), router.php, mu-plugins/ (fake API, dev only),
             tests/integration.mjs (real HTTP, fake API), e2e/agent.mjs (Base Sepolia, official x402 agent),

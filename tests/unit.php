@@ -12,6 +12,8 @@ require __DIR__ . '/../includes/class-p2flux-ap-rules.php';
 require __DIR__ . '/../includes/class-p2flux-ap-detector.php';
 require __DIR__ . '/../includes/class-p2flux-ap-botauth.php';
 require __DIR__ . '/../includes/class-p2flux-ap-files.php';
+require __DIR__ . '/../includes/class-p2flux-ap-cache.php';
+require __DIR__ . '/../includes/class-p2flux-ap-settings.php';
 
 $failures = 0;
 $checks   = 0;
@@ -254,6 +256,131 @@ foreach (
 	check( 'no token: ' . $what, array() === P2Flux_AP_Rules::access_tokens( $header ) );
 }
 check( 'the good one survives junk around it', array( $t2 ) === P2Flux_AP_Rules::access_tokens( "junk, {$t2}, <script>" ) );
+
+
+echo "page caches\n";
+// The few WordPress functions P2Flux_AP_Cache::sync() and purge() touch, recorded.
+$GLOBALS['wp_calls']   = array();
+$GLOBALS['wp_options'] = array();
+$GLOBALS['wp_home']    = sys_get_temp_dir() . '/p2flux-ap-unit-' . getmypid() . '/';
+@mkdir( $GLOBALS['wp_home'] );
+function __( $text ) { return $text; }
+function apply_filters( $hook, $value ) { return $value; }
+function do_action( $hook ) { $GLOBALS['wp_calls'][] = $hook; }
+function get_option( $name, $default = false ) { return $GLOBALS['wp_options'][ $name ] ?? $default; }
+function update_option( $name, $value ) { $GLOBALS['wp_options'][ $name ] = $value; }
+function delete_option( $name ) { unset( $GLOBALS['wp_options'][ $name ] ); }
+function get_home_path() { return $GLOBALS['wp_home']; }
+function wp_is_writable( $path ) { return is_writable( $path ); }
+foreach ( array( 'rocket_clean_domain', 'flush_rocket_htaccess', 'rocket_generate_config_file', 'w3tc_flush_all', 'wp_cache_clear_cache' ) as $fn ) {
+	eval( "function {$fn}() { \$GLOBALS['wp_calls'][] = '{$fn}'; }" ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- test stubs.
+}
+$pattern = P2Flux_AP_Detector::pattern();
+$lines   = P2Flux_AP_Cache::rules( $pattern );
+$rule    = implode( "\n", $lines );
+check( 'LiteSpeed rule is inert without LiteSpeed', '<IfModule LiteSpeed>' === $lines[0] && '</IfModule>' === end( $lines ) );
+check( 'every agent user agent skips the cache', false !== strpos( $rule, 'RewriteCond %{HTTP_USER_AGENT} (' . $pattern . ') [NC,OR]' ) );
+foreach ( array( 'ClaudeBot', 'ChatGPT-User', 'PerplexityBot', 'GPTBot', 'curl/' ) as $ua ) {
+	check( "the rule names {$ua}", false !== strpos( $rule, $ua ) );
+}
+check( 'no user agent and "node" skip the cache', false !== strpos( $rule, 'RewriteCond %{HTTP_USER_AGENT} ^(node)?$ [NC,OR]' ) );
+check( 'a payment header skips the cache', false !== strpos( $rule, '%{HTTP:Payment-Signature} !^$ [OR]' ) && false !== strpos( $rule, '%{HTTP:X-Payment} !^$' ) );
+check( 'the last condition has no [OR]', 1 === preg_match( '/!\^\$\nRewriteRule \.\* - \[E=Cache-Control:no-cache\]/', $rule ) );
+$m = array();
+preg_match( '/\(([^)]*)\) \[NC,OR\]/', $rule, $m );
+$regex = '#' . str_replace( '#', '\#', $m[1] ) . '#i';
+check( 'the rule matches the agents the gate charges', 1 === preg_match( $regex, 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)' ) && 1 === preg_match( $regex, 'Mozilla/5.0 (compatible; Kangaroo Bot/1.0)' ) );
+check( '...and not a browser', 0 === preg_match( $regex, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36' ) );
+check( 'WP Rocket gets the agents as rejected user agents', in_array( 'ClaudeBot', P2Flux_AP_Cache::rocket_reject_ua( array( 'x' ) ), true ) );
+
+$wp      = "# BEGIN WordPress\nRewriteEngine On\nRewriteRule . /index.php [L]\n# END WordPress\n";
+$added   = P2Flux_AP_Cache::with_block( $wp, $lines );
+check( 'block goes first, above WordPress', 0 === strpos( $added, "# BEGIN P2Flux Agent Paywall\n<IfModule LiteSpeed>" ) && str_ends_with( $added, $wp ) );
+check( 'adding twice changes nothing', $added === P2Flux_AP_Cache::with_block( $added, $lines ) );
+$other   = P2Flux_AP_Cache::with_block( $added, array( '# changed' ) );
+check( 'a changed rule replaces the block, once', 1 === substr_count( $other, '# BEGIN P2Flux Agent Paywall' ) && false !== strpos( $other, '# changed' ) && false === strpos( $other, 'IfModule' ) );
+check( 'removing leaves the file as it was', $wp === P2Flux_AP_Cache::with_block( $added, array() ) );
+check( 'removing twice changes nothing', $wp === P2Flux_AP_Cache::with_block( $wp, array() ) );
+check( 'Windows line ends: removed too', $wp === P2Flux_AP_Cache::with_block( str_replace( "\n", "\r\n", P2Flux_AP_Cache::with_block( '', $lines ) ) . $wp, array() ) );
+check( 'another plugin\'s block is left alone', false !== strpos( P2Flux_AP_Cache::with_block( "# BEGIN LSCACHE\nx\n# END LSCACHE\n", array() ), 'LSCACHE' ) );
+
+$file = $GLOBALS['wp_home'] . '.htaccess';
+file_put_contents( $file, $wp );
+P2Flux_AP_Cache::sync();
+check( 'sync writes the block', $added === file_get_contents( $file ) );
+check( 'a new rule purges every active cache', array( 'litespeed_purge_all', 'flush_rocket_htaccess', 'rocket_generate_config_file', 'rocket_clean_domain', 'w3tc_flush_all', 'wp_cache_clear_cache' ) === $GLOBALS['wp_calls'], implode( ',', $GLOBALS['wp_calls'] ) );
+$GLOBALS['wp_calls'] = array();
+P2Flux_AP_Cache::sync();
+check( 'sync again: file the same, no purge', $added === file_get_contents( $file ) && array() === $GLOBALS['wp_calls'] );
+check( 'in place', P2Flux_AP_Cache::in_place() );
+P2Flux_AP_Cache::sync( true );
+check( 'removing restores the file and purges', $wp === file_get_contents( $file ) && in_array( 'litespeed_purge_all', $GLOBALS['wp_calls'], true ) && ! isset( $GLOBALS['wp_options'][ P2Flux_AP_Cache::OPTION ] ) );
+check( 'WP Rocket does not get the agents while they are removed', array( 'x' ) === P2Flux_AP_Cache::rocket_reject_ua( array( 'x' ) ) );
+$GLOBALS['wp_calls'] = array();
+P2Flux_AP_Cache::sync( true );
+check( 'removing twice: nothing to do', $wp === file_get_contents( $file ) && array() === $GLOBALS['wp_calls'] );
+chmod( $file, 0444 );
+$GLOBALS['wp_calls'] = array();
+if ( ! is_writable( $file ) ) {
+	P2Flux_AP_Cache::sync();
+	check( 'a read-only .htaccess is not touched (the page shows the lines)', $wp === file_get_contents( $file ) && ! P2Flux_AP_Cache::in_place() );
+}
+chmod( $file, 0644 );
+unlink( $file );
+rmdir( $GLOBALS['wp_home'] );
+
+echo "setup test\n";
+$valid = array( 'payment-required' => base64_encode( json_encode( array( 'x402Version' => 2, 'accepts' => array( array( 'scheme' => 'exact' ) ) ) ) ) );
+check( '402 with a valid PAYMENT-REQUIRED is ok', 'ok' === P2Flux_AP_Cache::classify( 402, $valid )['state'] );
+check( '402 without one is not ok', 'unknown' === P2Flux_AP_Cache::classify( 402, array() )['state'] );
+check( '402 with junk is not ok', 'unknown' === P2Flux_AP_Cache::classify( 402, array( 'payment-required' => 'e30=' ) )['state'] );
+check( '200 is free', 'free' === P2Flux_AP_Cache::classify( 200, array() )['state'] );
+check( '429 is blocked', 'blocked' === P2Flux_AP_Cache::classify( 429, array() )['state'] );
+check( '403 is blocked', 'blocked' === P2Flux_AP_Cache::classify( 403, array() )['state'] );
+check( 'no answer is unknown', 'unknown' === P2Flux_AP_Cache::classify( '', array() )['state'] );
+check( 'x-litespeed-cache names LiteSpeed', 'litespeed' === P2Flux_AP_Cache::classify( 200, array( 'x-litespeed-cache' => 'hit' ) )['cache'] );
+check( 'cf-cache-status HIT names Cloudflare', 'cloudflare' === P2Flux_AP_Cache::detect( array( 'cf-cache-status' => 'HIT' ) ) );
+check( 'cf-cache-status DYNAMIC is not a cache', '' === P2Flux_AP_Cache::detect( array( 'cf-cache-status' => 'DYNAMIC' ) ) );
+check( 'x-cache HIT names a proxy', 'proxy' === P2Flux_AP_Cache::detect( array( 'x-cache' => 'HIT from cdn' ) ) );
+check( 'WP Rocket from its page footer', 'wp-rocket' === P2Flux_AP_Cache::detect( array(), '<!-- This website is like a Rocket -->' ) );
+check( 'nothing: no cache named', '' === P2Flux_AP_Cache::detect( array( 'server' => 'nginx' ) ) );
+$ok   = array( 'state' => 'ok', 'cache' => '' );
+$free = array( 'state' => 'free', 'cache' => 'litespeed' );
+$v    = P2Flux_AP_Settings::verdict( array( $ok, $ok, $ok ), 'https://x.test/p/' );
+check( 'verdict: 402 twice is working', true === $v['ok'] && false !== strpos( $v['message'], 'Working' ) );
+$v = P2Flux_AP_Settings::verdict( array( $ok, $free, $ok ), 'https://x.test/p/' );
+check( 'verdict: cached 200 names the cache and what to do', false === $v['ok'] && false !== strpos( $v['message'], 'serves paid pages to agents for free' ) && false !== strpos( $v['message'], 'LiteSpeed Cache' ) && false !== strpos( $v['message'], 'Purge All' ) );
+$v = P2Flux_AP_Settings::verdict( array( array( 'state' => 'free', 'cache' => '' ), array( 'state' => 'free', 'cache' => '' ), array( 'state' => 'free', 'cache' => '' ) ), 'https://x.test/p/' );
+check( 'verdict: free even past the cache says so', false === $v['ok'] && false !== strpos( $v['message'], 'even past the page cache' ) );
+$v = P2Flux_AP_Settings::verdict( array( array( 'state' => 'blocked', 'cache' => '' ), array( 'state' => 'blocked', 'cache' => '' ), array( 'state' => 'blocked', 'cache' => '' ) ), 'https://x.test/p/' );
+check( 'verdict: 429/403 says the host blocks agents', false === $v['ok'] && false !== strpos( $v['message'], 'blocks AI agents before WordPress' ) );
+$v = P2Flux_AP_Settings::verdict( array( array( 'state' => 'unknown', 'cache' => '' ), array( 'state' => 'unknown', 'cache' => '' ), array( 'state' => 'unknown', 'cache' => '' ) ), 'https://x.test/p/' );
+check( 'verdict: anything else could not check', null === $v['ok'] );
+
+// The whole test against mocked HTTP: a person, an agent twice, an agent past the cache.
+class P2Flux_AP_Gate { public static function price_of( $post ) { return '0.05'; } } // phpcs:ignore
+function get_posts() { return array( (object) array( 'ID' => 1 ) ); }
+function get_permalink() { return 'https://x.test/p/'; }
+function add_query_arg( $k, $v, $url ) { return $url . '?' . $k . '=' . $v; }
+function wp_rand() { return 7; }
+function wp_remote_get( $url, $args ) { $GLOBALS['wp_http'][] = array( $url, $args['user-agent'] ); return array_shift( $GLOBALS['wp_answers'] ); }
+function wp_remote_retrieve_response_code( $r ) { return $r['code']; }
+function wp_remote_retrieve_headers( $r ) { return $r['headers']; }
+function wp_remote_retrieve_body( $r ) { return ''; }
+$human = array( 'code' => 200, 'headers' => array() );
+$paid  = array( 'code' => 402, 'headers' => $valid );
+$hit   = array( 'code' => 200, 'headers' => array( 'x-litespeed-cache' => 'hit' ) );
+$GLOBALS['wp_http']    = array();
+$GLOBALS['wp_answers'] = array( $human, $paid, $paid, $paid );
+$v                     = P2Flux_AP_Settings::cache_check();
+check( 'cache_check: 402 -> working', true === $v['ok'] );
+check( 'cache_check: a person first, then an agent three times, the last past the cache', 4 === count( $GLOBALS['wp_http'] ) && false === strpos( $GLOBALS['wp_http'][0][1], 'GPTBot' ) && false !== strpos( $GLOBALS['wp_http'][3][1], 'GPTBot' ) && 'https://x.test/p/?p2flux_ap_nocache=7' === $GLOBALS['wp_http'][3][0] );
+$GLOBALS['wp_answers'] = array( $human, $hit, $hit, $paid );
+$v                     = P2Flux_AP_Settings::cache_check();
+check( 'cache_check: LiteSpeed hit 200 -> free, named', false === $v['ok'] && false !== strpos( $v['message'], 'LiteSpeed Cache' ) );
+$GLOBALS['wp_answers'] = array( $human, array( 'code' => 429, 'headers' => array() ), array( 'code' => 429, 'headers' => array() ), array( 'code' => 429, 'headers' => array() ) );
+$v                     = P2Flux_AP_Settings::cache_check();
+check( 'cache_check: 429 -> host blocks agents', false === $v['ok'] && false !== strpos( $v['message'], 'blocks AI agents' ) );
 
 echo "\n{$checks} checks, {$failures} failed\n";
 exit( $failures ? 1 : 0 );

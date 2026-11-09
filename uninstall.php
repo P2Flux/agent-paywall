@@ -17,6 +17,10 @@ if ( is_file( wp_upload_dir()['basedir'] . '/.htaccess' ) ) {
 	require_once ABSPATH . 'wp-admin/includes/misc.php';
 	insert_with_markers( wp_upload_dir()['basedir'] . '/.htaccess', 'P2Flux Agent Paywall', array() );
 }
+// The rule that lets AI agents skip the page cache, in the site's .htaccess.
+require_once __DIR__ . '/includes/class-p2flux-ap-detector.php';
+require_once __DIR__ . '/includes/class-p2flux-ap-cache.php';
+P2Flux_AP_Cache::sync( true );
 wp_clear_scheduled_hook( 'p2flux_ap_prune' );
 wp_clear_scheduled_hook( 'p2flux_ap_refresh_listing' );
 // phpcs:disable WordPress.DB.DirectDatabaseQuery

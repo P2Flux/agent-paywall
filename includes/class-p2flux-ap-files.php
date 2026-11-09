@@ -173,6 +173,7 @@ class P2Flux_AP_Files {
 			exit;
 		}
 		if ( P2Flux_AP_Gate::is_agent() ) {
+			P2Flux_AP_Cache::no_store();
 			$decision = P2Flux_AP_Gate::charge( $price, (string) wp_get_attachment_url( $id ), $id, $type );
 			if ( true !== $decision['ok'] ) {
 				P2Flux_AP_Gate::send( $decision );

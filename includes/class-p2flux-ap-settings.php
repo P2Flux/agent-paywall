@@ -54,6 +54,7 @@ class P2Flux_AP_Settings {
 		add_action( 'add_option_' . self::OPTION, array( 'P2Flux_AP_Discovery', 'announce' ), 10, 0 );
 		// With no wallet nothing is paid, and the uploads rule would send agents to a handler that is not there.
 		add_action( 'update_option_' . self::OPTION, array( __CLASS__, 'sync_files' ), 10, 0 );
+		add_action( 'add_option_' . self::OPTION, array( __CLASS__, 'sync_files' ), 10, 0 );
 		add_action( 'admin_menu', array( __CLASS__, 'menu' ) );
 		add_action( 'admin_init', array( __CLASS__, 'register_setting' ) );
 		add_action( 'admin_post_p2flux_ap_check', array( __CLASS__, 'check' ) );
@@ -82,6 +83,7 @@ class P2Flux_AP_Settings {
 	 */
 	public static function sync_files() {
 		P2Flux_AP_Files::sync( '' === self::get()['wallet'] );
+		P2Flux_AP_Cache::sync( '' === self::get()['wallet'] );
 	}
 
 	/**
@@ -204,8 +206,8 @@ class P2Flux_AP_Settings {
 				'message' => __( 'Nothing is paid yet: choose what agents pay for, save, and check again.', 'p2flux-agent-paywall' ),
 			);
 		}
-		$open = static fn( $user_agent ) => wp_remote_get(
-			$url,
+		$open = static fn( $user_agent, $address ) => wp_remote_get(
+			$address,
 			array(
 				'timeout'     => 10,
 				'redirection' => 0,
@@ -213,31 +215,88 @@ class P2Flux_AP_Settings {
 				'sslverify'   => apply_filters( 'https_local_ssl_verify', false ), // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- core's own filter for requests to this site.
 			)
 		);
-		$open( 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36' );
-		$code = wp_remote_retrieve_response_code( $open( 'Mozilla/5.0 (compatible; GPTBot/1.2; P2Flux setup check)' ) );
-		if ( 402 === $code ) {
+		$agent = 'Mozilla/5.0 (compatible; GPTBot/1.2; P2Flux setup check)';
+		// A person first, as a real visit stores the page in a cache; then an agent twice (the second
+		// is answered from the cache if anything is), then an agent past the cache.
+		$open( 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36', $url );
+		$seen = array();
+		foreach ( array( $url, $url, add_query_arg( 'p2flux_ap_nocache', (string) wp_rand(), $url ) ) as $address ) {
+			$response = $open( $agent, $address );
+			$headers  = wp_remote_retrieve_headers( $response );
+			$seen[]   = P2Flux_AP_Cache::classify(
+				wp_remote_retrieve_response_code( $response ),
+				is_object( $headers ) && method_exists( $headers, 'getAll' ) ? $headers->getAll() : (array) $headers,
+				substr( (string) wp_remote_retrieve_body( $response ), -4096 )
+			);
+		}
+		return self::verdict( $seen, $url );
+	}
+
+	/**
+	 * What the setup test tells the owner. Pure but for translation.
+	 *
+	 * @param array  $seen Three P2Flux_AP_Cache::classify() results: agent, agent again, agent past the cache.
+	 * @param string $url  The paid page.
+	 * @return array{ok: bool|null, message: string}
+	 */
+	public static function verdict( array $seen, $url ) {
+		$plain  = array( $seen[0]['state'], $seen[1]['state'] );
+		$cache  = '' !== $seen[1]['cache'] ? $seen[1]['cache'] : $seen[0]['cache'];
+		$names  = array(
+			'litespeed'      => 'LiteSpeed Cache',
+			'cloudflare'     => 'Cloudflare',
+			'hostinger'      => 'Hostinger CDN',
+			'siteground'     => 'SiteGround Dynamic Cache',
+			'varnish'        => 'Varnish',
+			'wp-rocket'      => 'WP Rocket',
+			'w3tc'           => 'W3 Total Cache',
+			'wp-super-cache' => 'WP Super Cache',
+			'proxy'          => __( 'a proxy cache', 'p2flux-agent-paywall' ),
+		);
+		$advice = array(
+			'litespeed'      => __( 'This plugin adds a rule to your .htaccess so AI agents skip LiteSpeed Cache; if it could not write the file, the rule is shown below - add it at the very top. Then LiteSpeed Cache → Toolbox → Purge All.', 'p2flux-agent-paywall' ),
+			'cloudflare'     => __( 'In Cloudflare add a Cache Rule that bypasses the cache when the user agent is an AI agent or a PAYMENT-SIGNATURE header is sent (APO: exclude these pages), then purge the cache.', 'p2flux-agent-paywall' ),
+			'wp-rocket'      => __( 'Deactivate and activate this plugin once so WP Rocket picks up the AI user agents, then WP Rocket → Clear cache.', 'p2flux-agent-paywall' ),
+			'w3tc'           => __( 'In W3 Total Cache → Page Cache → Rejected user agents, add the AI user agents from the P2Flux guide, then Performance → Purge All Caches.', 'p2flux-agent-paywall' ),
+			'wp-super-cache' => __( 'In WP Super Cache → Advanced → Rejected User Agents, add the AI user agents from the P2Flux guide, then delete the cache.', 'p2flux-agent-paywall' ),
+		);
+		$generic = __( 'Exclude AI user agents (and requests with a PAYMENT-SIGNATURE header) from cached pages in your cache plugin, host panel or CDN, then purge the cache. The P2Flux guide "Caches and CDNs" has the list and the steps.', 'p2flux-agent-paywall' );
+		if ( array( 'ok', 'ok' ) === $plain ) {
 			return array(
 				'ok'      => true,
 				/* translators: %s: a page address */
 				'message' => sprintf( __( 'Working: an AI agent that opens %s is asked to pay.', 'p2flux-agent-paywall' ), $url ),
 			);
 		}
-		if ( 200 === $code ) {
+		if ( in_array( 'free', $plain, true ) ) {
+			$name = $names[ $cache ] ?? __( 'a page cache or CDN', 'p2flux-agent-paywall' );
+			if ( 'ok' === $seen[2]['state'] ) {
+				return array(
+					'ok'      => false,
+					/* translators: 1: a page address, 2: the name of a cache, 3: what to do */
+					'message' => sprintf( __( 'Your cache or host serves paid pages to agents for free: an AI agent that opens %1$s gets the full page from %2$s, while WordPress itself asks it to pay. %3$s', 'p2flux-agent-paywall' ), $url, $name, $advice[ $cache ] ?? $generic ),
+				);
+			}
 			return array(
 				'ok'      => false,
 				/* translators: %s: a page address */
-				'message' => sprintf( __( 'An AI agent that opens %s gets the full page without paying. A page cache or CDN in front of your site is answering instead of WordPress. In your cache plugin or CDN, exclude AI user agents from cached pages - the P2Flux guide "Caches and CDNs" has the list and the steps.', 'p2flux-agent-paywall' ), $url ),
+				'message' => sprintf( __( 'An AI agent that opens %s gets the full page without paying, even past the page cache. Another plugin or your host may answer instead of WordPress, or treat the test as a logged-in visit. ', 'p2flux-agent-paywall' ), $url ) . $generic,
+			);
+		}
+		if ( in_array( 'blocked', $plain, true ) ) {
+			return array(
+				'ok'      => false,
+				'message' => __( 'Your host or firewall blocks AI agents before WordPress runs (403 or 429): they cannot pay because they never reach your site. Allow AI user agents in your host\'s bot protection or firewall settings (Cloudflare: Security → Bots).', 'p2flux-agent-paywall' ),
 			);
 		}
 		return array(
 			'ok'      => null,
-			/* translators: %s: an HTTP status code, or "no answer" */
-			'message' => sprintf( __( 'Could not check: the site answered its own request with "%s". If P2Flux cannot be reached right now, try again in a minute.', 'p2flux-agent-paywall' ), $code ? $code : __( 'no answer', 'p2flux-agent-paywall' ) ),
+			'message' => __( 'Could not check: the site did not answer its own request with 402 and a valid payment requirement. If P2Flux cannot be reached right now, try again in a minute.', 'p2flux-agent-paywall' ),
 		);
 	}
 
 	/**
-	 * The "Check my setup" button.
+	 * The "Test my paywall" button.
 	 *
 	 * @return void
 	 */
@@ -246,6 +305,8 @@ class P2Flux_AP_Settings {
 			wp_die( esc_html__( 'Not allowed.', 'p2flux-agent-paywall' ), 403 );
 		}
 		check_admin_referer( 'p2flux_ap_check' );
+		// Put the cache rule back if it went missing (and purge), before testing.
+		P2Flux_AP_Cache::sync( '' === self::get()['wallet'] );
 		set_transient( 'p2flux_ap_check_' . get_current_user_id(), self::cache_check(), 60 );
 		wp_safe_redirect( admin_url( 'options-general.php?page=' . self::PAGE ) );
 		exit;
@@ -292,6 +353,16 @@ class P2Flux_AP_Settings {
 				delete_transient( 'p2flux_ap_check_' . get_current_user_id() );
 				?>
 			<div class="notice inline notice-<?php echo esc_attr( true === $checked['ok'] ? 'success' : ( false === $checked['ok'] ? 'error' : 'warning' ) ); ?>"><p><?php echo esc_html( $checked['message'] ); ?></p></div>
+			<?php endif; ?>
+
+			<?php
+			$software = isset( $_SERVER['SERVER_SOFTWARE'] ) ? sanitize_text_field( wp_unslash( $_SERVER['SERVER_SOFTWARE'] ) ) : '';
+			if ( '' !== $s['wallet'] && ( false !== stripos( $software, 'litespeed' ) || defined( 'LSCWP_V' ) ) && ! P2Flux_AP_Cache::in_place() ) :
+				?>
+			<div class="notice inline notice-warning">
+				<p><?php esc_html_e( 'Your .htaccess file cannot be written, so LiteSpeed Cache may serve paid pages to AI agents for free. Add these lines at the very top of the .htaccess file in your site\'s main folder, then purge LiteSpeed Cache:', 'p2flux-agent-paywall' ); ?></p>
+				<pre class="code"><?php echo esc_html( P2Flux_AP_Cache::with_block( '', P2Flux_AP_Cache::rules( P2Flux_AP_Cache::pattern() ) ) ); ?></pre>
+			</div>
 			<?php endif; ?>
 
 			<?php if ( '' !== $s['wallet'] ) : ?>
@@ -386,7 +457,7 @@ class P2Flux_AP_Settings {
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 				<input type="hidden" name="action" value="p2flux_ap_check">
 				<?php wp_nonce_field( 'p2flux_ap_check' ); ?>
-				<p><button type="submit" class="button"><?php esc_html_e( 'Check my setup', 'p2flux-agent-paywall' ); ?></button> <span class="description"><?php esc_html_e( 'Opens your newest paid post as an AI agent would, to see that it is asked to pay - also through your page cache or CDN.', 'p2flux-agent-paywall' ); ?></span></p>
+				<p><button type="submit" class="button"><?php esc_html_e( 'Test my paywall', 'p2flux-agent-paywall' ); ?></button> <span class="description"><?php esc_html_e( 'Opens your newest paid post as an AI agent would, to see that it is asked to pay - also through your page cache or CDN.', 'p2flux-agent-paywall' ); ?></span></p>
 			</form>
 			<?php endif; ?>
 
